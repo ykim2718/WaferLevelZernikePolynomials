@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wlzpoly"
+version = "0.0.0"
+description = "Wafer-level Zernike polynomial decomposition and fitting"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "yRocket" }]
+keywords = ["zernike", "wafer", "semiconductor", "metrology", "polynomial"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy>=1.22",
+    "pandas>=1.5",
+    "matplotlib>=3.5",
+    "tqdm>=4.60",
+]
+
+[project.urls]
+Homepage = "https://github.com/ykim2718/WaferLevelZernikePolynomials"
+Issues   = "https://github.com/ykim2718/WaferLevelZernikePolynomials/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

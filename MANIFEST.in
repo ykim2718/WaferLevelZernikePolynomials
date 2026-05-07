@@ -1,0 +1,10 @@
+include LICENSE
+include README.md
+include examples/*.py
+include examples/*.json
+prune examples/samples
+prune examples/decomposition
+prune examples/verification
+prune src/wlzpoly.egg-info
+global-exclude __pycache__
+global-exclude *.py[cod]
