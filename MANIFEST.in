@@ -1,7 +1,8 @@
 include LICENSE
-include README.md
+include README_PYPI.md
 include examples/*.py
 include examples/*.json
+exclude README.md
 prune examples/samples
 prune examples/decomposition
 prune examples/verification

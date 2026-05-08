@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "wlzpoly"
 version = "0.0.0"
 description = "Wafer-level Zernike polynomial decomposition and fitting"
-readme = "README.md"
+readme = "README_PYPI.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "yRocket" }]
