@@ -24,38 +24,19 @@ Outputs (under ./verification/)
 import argparse
 import csv
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-from tqdm import tqdm
 
-from .decompose import (
-    _resolve_under,
-    load_measured_data,
-    load_wafer_coordinates,
-)
-from .regression import (
-    SOLVER_CHOICES,
-    SolverLiteral,
-    fit_lsq,
-    fit_ridge,
-    loocv_lambda,
-)
-from .zernike_polynomials import (
-    COORDINATE_CHOICES,
-    CoordinateLiteral,
-    WaferLevelZernikePolynomials,
-    ZernikePolynomials,
-)
+from .regression import SOLVER_CHOICES, SolverLiteral
+from .zernike_polynomials import ZernikePolynomials
 
 
-WORKING_FOLDER_DEFAULT = Path.cwd()
-WAFER_POINTS_FILENAME_DEFAULT = "wafer_points.json"
-TARGET_FILE_DEFAULT = "target_file.csv"
+DECOMPOSED_LSQ_FILE_DEFAULT = "decomposed_targets_lsq.csv"
+DECOMPOSED_RIDGE_FILE_DEFAULT = "decomposed_targets_ridge.csv"
 GROUND_TRUTH_FILE_DEFAULT = "ground_truth_file.csv"
 N_TERMS_DEFAULT = 9
-LOOCV_LAMBDAS_DEFAULT = [0.0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
 OUT_FOLDER_DEFAULT = Path.cwd() / "verification"
 
 # Standard Zernike polynomial names by Noll (n, m). Used for column
@@ -136,53 +117,79 @@ def load_ground_truth(
 # -------------------------------------------------------------
 # 2. Verify - fit selected solvers, compare against truth
 # -------------------------------------------------------------
-def verify(
+def load_decomposed_targets(
+    decomposed_file: Union[str, Path],
     *,
-    wafer_points_file: Union[str, Path],
-    target_file: Union[str, Path],
-    ground_truth_file: Union[str, Path],
-    out_folder: Union[str, Path],
-    solvers: List[SolverLiteral],
-    n_terms: int = N_TERMS_DEFAULT,
-    loocv_lambdas: List[float] = None,
-    scenarios_to_show: List[str] = None,
-    zernike_names: Dict[tuple, str] = None,
-    coordinate: CoordinateLiteral = "cartesian",
-) -> List[Dict[str, Any]]:
-    """Compare selected solver fits against ground truth.
+    n_terms: int,
+) -> Dict[str, np.ndarray]:
+    """Load a decomposed-target CSV (id + a1..aN) into {id: coeffs}.
 
     Parameters
     ----------
-    n_terms : Zernike order (Noll j=1..n_terms).
-    loocv_lambdas : candidate lambdas for LOOCV (used when 'ridge' is in
-        solvers). Defaults to LOOCV_LAMBDAS_DEFAULT.
+    decomposed_file : Path
+        Path to a CSV produced by `wlzpoly.decompose` with columns
+        `id, a1, a2, ..., aN`.
+    n_terms : int
+        Number of coefficient columns to read. Must match the CSV.
+
+    Returns
+    -------
+    Dict[wafer_id, np.ndarray of shape (n_terms,)]
+    """
+    assert isinstance(decomposed_file, (str, Path)), (
+        f"decomposed_file must be str/Path, got "
+        f"{type(decomposed_file).__name__}"
+    )
+    assert isinstance(n_terms, int), (
+        f"n_terms must be int, got {type(n_terms).__name__}"
+    )
+    coeffs_by_id: Dict[str, np.ndarray] = {}
+    with Path(decomposed_file).open() as f:
+        rdr = csv.DictReader(f)
+        for row in rdr:
+            coeffs_by_id[row["id"]] = np.array(
+                [float(row[f"a{j}"]) for j in range(1, n_terms + 1)]
+            )
+    return coeffs_by_id
+
+
+def verify(
+    *,
+    ground_truth_file: Union[str, Path],
+    out_folder: Union[str, Path],
+    decomposed_lsq_file: Optional[Union[str, Path]] = None,
+    decomposed_ridge_file: Optional[Union[str, Path]] = None,
+    n_terms: int = N_TERMS_DEFAULT,
+    scenarios_to_show: List[str] = None,
+    zernike_names: Dict[tuple, str] = None,
+) -> List[Dict[str, Any]]:
+    """Compare precomputed decomposed coefficients against ground truth.
+
+    No fitting happens here -- both Stage 2 outputs (LSQ and/or Ridge)
+    are read in directly and compared with `ground_truth_file`.
+
+    Parameters
+    ----------
+    decomposed_lsq_file : optional CSV from `wlzpoly.decompose --solver lsq`.
+        If None or file does not exist, LSQ is skipped.
+    decomposed_ridge_file : optional CSV from `wlzpoly.decompose --solver
+        ridge` (with --auto_lam or fixed --lam). If None or file does not
+        exist, Ridge is skipped.
+    n_terms : Zernike order (must match the decomposed CSVs).
     scenarios_to_show : scenario labels to include in the per-scenario
         table/charts. None => every unique scenario from ground_truth
         except 'drift'.
     zernike_names : (n, m) -> readable name map for labels.
         None => ZERNIKE_NAMES_DEFAULT.
 
-    `coordinate` selects which fields of the wafer-points JSON to read.
+    At least one of decomposed_lsq_file / decomposed_ridge_file must
+    resolve to an existing file.
     """
-    if loocv_lambdas is None:
-        loocv_lambdas = list(LOOCV_LAMBDAS_DEFAULT)
     if zernike_names is None:
         zernike_names = ZERNIKE_NAMES_DEFAULT
 
     assert isinstance(n_terms, int), (
         f"n_terms must be int, got {type(n_terms).__name__}"
-    )
-    assert isinstance(loocv_lambdas, list), (
-        f"loocv_lambdas must be list, got "
-        f"{type(loocv_lambdas).__name__}"
-    )
-    assert isinstance(wafer_points_file, (str, Path)), (
-        f"wafer_points_file must be str/Path, got "
-        f"{type(wafer_points_file).__name__}"
-    )
-    assert isinstance(target_file, (str, Path)), (
-        f"target_file must be str/Path, got "
-        f"{type(target_file).__name__}"
     )
     assert isinstance(ground_truth_file, (str, Path)), (
         f"ground_truth_file must be str/Path, got "
@@ -191,39 +198,38 @@ def verify(
     assert isinstance(out_folder, (str, Path)), (
         f"out_folder must be str/Path, got {type(out_folder).__name__}"
     )
-    assert isinstance(solvers, list), (
-        f"solvers must be list, got {type(solvers).__name__}"
-    )
-    for s in solvers:
-        assert s in SOLVER_CHOICES, (
-            f"solver must be one of {SOLVER_CHOICES}, got {s!r}"
+
+    # ---- Resolve which solvers are actually available ----
+    solvers: List[SolverLiteral] = []
+    coeffs_by_solver: Dict[str, Dict[str, np.ndarray]] = {}
+
+    if decomposed_lsq_file is not None and Path(decomposed_lsq_file).is_file():
+        coeffs_by_solver["lsq"] = load_decomposed_targets(
+            decomposed_lsq_file, n_terms=n_terms,
         )
-    assert isinstance(coordinate, str), (
-        f"coordinate must be str, got {type(coordinate).__name__}"
-    )
-    assert coordinate in COORDINATE_CHOICES, (
-        f"coordinate must be one of {COORDINATE_CHOICES}, "
-        f"got {coordinate!r}"
+        solvers.append("lsq")
+    if decomposed_ridge_file is not None and Path(decomposed_ridge_file).is_file():
+        coeffs_by_solver["ridge"] = load_decomposed_targets(
+            decomposed_ridge_file, n_terms=n_terms,
+        )
+        solvers.append("ridge")
+
+    assert len(solvers) >= 1, (
+        "At least one of decomposed_lsq_file or decomposed_ridge_file "
+        "must exist on disk."
     )
 
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
 
-    lambdas = loocv_lambdas
     name = make_name_lookup(names_by_nm=zernike_names)
 
-    coords_df = load_wafer_coordinates(
-        wafer_points_file=wafer_points_file, coordinate=coordinate,
-    )
-    df_measured = load_measured_data(target_file=target_file)
     truth_map = load_ground_truth(
         ground_truth_file=ground_truth_file, n_terms=n_terms,
     )
 
     # ---- Determine which scenarios to show in per-scenario tables ----
     if scenarios_to_show is None:
-        # Default: every unique scenario in ground_truth except 'drift',
-        # in first-seen order.
         seen = []
         for gt in truth_map.values():
             sc = gt["scenario"]
@@ -233,78 +239,32 @@ def verify(
     else:
         show_scenes = list(scenarios_to_show)
 
-    # ---- Build wafer-level ZP (precomputes basis A from coords) ----
-    wlz = WaferLevelZernikePolynomials(
-        coords_df=coords_df,
-        coordinate=coordinate,
-        n_terms=n_terms,
-    )
-    A = wlz.A
-
     print("=" * 70)
-    print(
-        f"[verify] basis A shape = {A.shape}, "
-        f"rank = {np.linalg.matrix_rank(A)}"
-    )
-    print(f"[verify] cond(A^T A) = {np.linalg.cond(A.T @ A):.2e}")
-    print(f"[verify] solvers = {solvers}")
+    print(f"[verify] solvers loaded = {solvers}")
+    for s in solvers:
+        print(
+            f"[verify]   {s}: {len(coeffs_by_solver[s])} "
+            f"wafer rows from decomposed CSV"
+        )
     print("=" * 70)
 
-    # ---- LOOCV lambda only if Ridge was requested ----
-    best_lam = None
-    # Reindex T by coords_df's point order so A's rows match T's rows.
-    point_order = list(wlz.coords_df.index)
-
-    if "ridge" in solvers:
-        normal_id = next(
-            sid for sid, gt in truth_map.items()
-            if gt["scenario"] == "normal"
-        )
-        T_normal = (
-            df_measured.xs(normal_id, level="wafer_id")["T"]
-            .reindex(point_order)
-            .to_numpy(dtype=float)
-        )
-        best_lam, lam_errors = loocv_lambda(
-            A=A, T=T_normal, lambdas=lambdas,
-        )
-        print(f"\n[verify] LOOCV lam scan on '{normal_id}':")
-        for lam, err in lam_errors.items():
-            marker = "  <- best" if lam == best_lam else ""
-            print(
-                f"   lam = {lam:>7.3f}   "
-                f"mean err^2 = {err:.4f}{marker}"
-            )
-        print()
-
-    # ---- Fit every sample with each requested solver ----
+    # ---- Build results list by joining ground_truth with each solver ----
     results: List[Dict[str, Any]] = []
-    wafer_ids = (
-        df_measured.index.get_level_values("wafer_id").unique()
-    )
-    pbar = tqdm(wafer_ids, ncols=100, unit="wafer")
-    for wafer_id in pbar:
-        pbar.set_description(f"Verifying {wafer_id}")
-        T = (
-            df_measured.xs(wafer_id, level="wafer_id")["T"]
-            .reindex(point_order)
-            .to_numpy(dtype=float)
-        )
-        gt = truth_map.get(wafer_id)
-        truth = (
-            gt["truth"] if gt is not None
-            else np.full(n_terms, np.nan)
-        )
-        scenario = gt["scenario"] if gt is not None else ""
+    for wafer_id, gt in truth_map.items():
+        truth = gt["truth"]
+        scenario = gt["scenario"]
         row: Dict[str, Any] = {
             "id": wafer_id,
             "scenario": scenario,
             "truth": truth,
         }
-        if "lsq" in solvers:
-            row["lsq"] = fit_lsq(A=A, T=T)
-        if "ridge" in solvers:
-            row["ridge"] = fit_ridge(A=A, T=T, lam=best_lam)
+        for s in solvers:
+            coeffs = coeffs_by_solver[s].get(wafer_id)
+            if coeffs is None:
+                # Wafer present in truth but not in decomposed CSV.
+                row[s] = np.full(n_terms, np.nan)
+            else:
+                row[s] = coeffs
         results.append(row)
 
     # ---- Scenario-level comparison (per solver) ----
@@ -359,8 +319,6 @@ def verify(
         for solver in solvers:
             line += f"{rmse_by_solver[solver][j]:>14.4f}  "
         print(line)
-    if best_lam is not None:
-        print(f"\nlam used for Ridge: {best_lam}")
     print("=" * 70)
 
     # ---- Save verification CSV + plots ----
@@ -551,22 +509,18 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "--working_folder", type=Path,
-        default=WORKING_FOLDER_DEFAULT,
-        help='Base folder for resolving the relative path of '
-             '--wafer_points. (default: Path.cwd())',
+        "--decomposed_lsq_file", type=Path,
+        default=DECOMPOSED_LSQ_FILE_DEFAULT,
+        help='LSQ-fitted CSV from Stage 2 (id + a1..aN). If the file '
+             'does not exist, LSQ is skipped in this verify run. '
+             f'(default: "{DECOMPOSED_LSQ_FILE_DEFAULT}")',
     )
     parser.add_argument(
-        "--wafer_points", type=Path,
-        default=WAFER_POINTS_FILENAME_DEFAULT,
-        help='Wafer measurement-point JSON. If relative, resolved '
-             'under --working_folder. (default: "wafer_points.json")',
-    )
-    parser.add_argument(
-        "--target_file", type=Path, default=TARGET_FILE_DEFAULT,
-        help='Path to the measurement CSV (id + P1..PN). If relative, '
-             'resolved against the current working directory. '
-             '(default: "target_file.csv")',
+        "--decomposed_ridge_file", type=Path,
+        default=DECOMPOSED_RIDGE_FILE_DEFAULT,
+        help='Ridge-fitted CSV from Stage 2 (id + a1..aN). If the file '
+             'does not exist, Ridge is skipped in this verify run. '
+             f'(default: "{DECOMPOSED_RIDGE_FILE_DEFAULT}")',
     )
     parser.add_argument(
         "--ground_truth_file", type=Path,
@@ -576,49 +530,29 @@ def parse_args() -> argparse.Namespace:
              'directory. (default: "ground_truth_file.csv")',
     )
     parser.add_argument(
+        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
+        help='Folder to write outputs into '
+             '(default: Path.cwd() / "verification")',
+    )
+    parser.add_argument(
         "--n_terms", type=int, default=N_TERMS_DEFAULT,
         help=(
-            'Number of Zernike polynomial terms (Noll j=1..n_terms).\n'
+            'Number of Zernike polynomial terms (Noll j=1..n_terms). '
+            'Must match the Stage 2 run that produced the decomposed '
+            'CSVs.\n'
             'Names by j:\n'
             '   1  Piston       2  Tilt X       3  Tilt Y\n'
             '   4  Defocus      5  Astig 45     6  Astig 0\n'
             '   7  Coma Y       8  Coma X       9  Trefoil Y\n'
             '  10  Trefoil X   11  Spherical   ...\n'
-            'Max: number of points in --wafer_points '
-            '(exceeding is meaningless -- A^T A becomes singular).\n'
             f'(default: {N_TERMS_DEFAULT})'
         ),
-    )
-    parser.add_argument(
-        "--loocv_lambdas", type=float, nargs="+",
-        default=LOOCV_LAMBDAS_DEFAULT,
-        help='Candidate Ridge lambdas tried during LOOCV (only used '
-             "when 'ridge' is among --solver). "
-             f'(default: {LOOCV_LAMBDAS_DEFAULT})',
     )
     parser.add_argument(
         "--scenarios_to_show", type=str, nargs="+", default=None,
         help='Scenario labels to include in the per-scenario tables '
              'and charts. Omit to use every unique scenario from '
              "ground_truth except 'drift'. (default: auto)",
-    )
-    parser.add_argument(
-        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
-        help='Folder to write outputs into '
-             '(default: Path.cwd() / "verification")',
-    )
-    parser.add_argument(
-        "--solver", nargs="+", choices=SOLVER_CHOICES,
-        default=SOLVER_CHOICES,
-        help="Which solver(s) to run (default: lsq ridge)",
-    )
-    parser.add_argument(
-        "--coordinate", type=str, choices=COORDINATE_CHOICES,
-        default="cartesian",
-        help=(
-            "Which fields of points_13.json to read for the "
-            "(rho, theta) grid (default: cartesian)"
-        ),
     )
     return parser.parse_args()
 
@@ -628,33 +562,28 @@ if __name__ == "__main__":
     assert isinstance(args, argparse.Namespace), (
         f"args must be Namespace, got {type(args).__name__}"
     )
-    wafer_points_path = _resolve_under(
-        args.wafer_points, args.working_folder,
-    )
-    target_path = Path(args.target_file).resolve()
+    lsq_path = Path(args.decomposed_lsq_file).resolve()
+    ridge_path = Path(args.decomposed_ridge_file).resolve()
     ground_truth_path = Path(args.ground_truth_file).resolve()
 
     print("=" * 70)
     print("[verify] arguments")
     print("=" * 70)
-    print(f"  Working folder : {Path(args.working_folder).resolve()}")
-    print(f"  Wafer points   : {wafer_points_path}")
-    print(f"  Target file    : {target_path}")
-    print(f"  Ground truth   : {ground_truth_path}")
-    print(f"  Output folder  : {args.output_folder.resolve()}")
-    print(f"  n_terms        : {args.n_terms}")
-    print(f"  Solvers        : {args.solver}")
-    print(f"  Coordinate     : {args.coordinate}")
+    print(f"  Decomposed LSQ   : {lsq_path}"
+          f"   {'(found)' if lsq_path.is_file() else '(missing -> skip)'}")
+    print(f"  Decomposed Ridge : {ridge_path}"
+          f"   {'(found)' if ridge_path.is_file() else '(missing -> skip)'}")
+    print(f"  Ground truth     : {ground_truth_path}")
+    print(f"  Output folder    : {args.output_folder.resolve()}")
+    print(f"  n_terms          : {args.n_terms}")
+    print(f"  scenarios_to_show: {args.scenarios_to_show or 'auto'}")
     print()
 
     verify(
-        wafer_points_file=wafer_points_path,
-        target_file=target_path,
+        decomposed_lsq_file=lsq_path if lsq_path.is_file() else None,
+        decomposed_ridge_file=ridge_path if ridge_path.is_file() else None,
         ground_truth_file=ground_truth_path,
         out_folder=args.output_folder,
-        solvers=args.solver,
         n_terms=args.n_terms,
-        loocv_lambdas=args.loocv_lambdas,
         scenarios_to_show=args.scenarios_to_show,
-        coordinate=args.coordinate,
     )
