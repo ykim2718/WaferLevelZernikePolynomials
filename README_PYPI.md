@@ -75,18 +75,22 @@ cd examples
 .\run_demo.ps1                                   # runs all three stages
 ```
 
-`run_demo.ps1` invokes the three stages in order:
+`run_demo.ps1` invokes four steps in order:
 
 ```bash
 python generate_samples.py ...                   # Stage 1: synthesize wafers
-                                                 #   -> samples/target_file.csv,
-                                                 #      samples/ground_truth.csv, ...
-python -m wlzpoly.decompose --target_file ...    # Stage 2: fit Zernike coefficients
-python -m wlzpoly.verify --target_file ...       # Stage 3: compare vs ground truth
-                       --ground_truth_file ...
+                                                 #   -> 1_samples/target_file.csv,
+                                                 #      1_samples/ground_truth.csv, ...
+python -m wlzpoly.decompose --solver lsq   ...   # Stage 2a: LSQ fit
+                                                 #   -> 2_decomposition/decomposed_targets_lsq.csv
+python -m wlzpoly.decompose --solver ridge --auto_lam ...
+                                                 # Stage 2b: Ridge fit with LOOCV
+                                                 #   -> 2_decomposition/decomposed_targets_ridge.csv
+python -m wlzpoly.verify ...                     # Stage 3: read both CSVs + ground_truth,
+                                                 #   compare, plot (no fitting)
 ```
 
-Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--target_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
+Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--input_file`, `--output_file`, `--auto_lam`, `--decomposed_lsq_file`, `--decomposed_ridge_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
 
 ## Documentation
 

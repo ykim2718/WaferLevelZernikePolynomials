@@ -32,24 +32,34 @@ python generate_samples.py `
     --n_drift 30 `
     --output_folder ./1_samples
 
-# Stage 2: fit coefficients       -> examples/decomposition/
+# Stage 2a: LSQ fit                -> examples/2_decomposition/decomposed_targets_lsq.csv
 python -m wlzpoly.decompose `
     --working_folder . `
     --wafer_points ./1_samples/points_13.json `
-    --target_file ./1_samples/target_file.csv `
-    --n_terms 9 `
+    --input_file ./1_samples/target_file.csv `
     --output_folder ./2_decomposition `
+    --output_file decomposed_targets_lsq.csv `
+    --n_terms 9 `
     --solver lsq `
-    --lam 0.01 `
     --coordinate cartesian
 
-# Stage 3: compare vs truth       -> examples/verification/
-python -m wlzpoly.verify `
+# Stage 2b: Ridge fit with LOOCV   -> examples/2_decomposition/decomposed_targets_ridge.csv
+python -m wlzpoly.decompose `
     --working_folder . `
     --wafer_points ./1_samples/points_13.json `
-    --target_file ./1_samples/target_file.csv `
+    --input_file ./1_samples/target_file.csv `
+    --output_folder ./2_decomposition `
+    --output_file decomposed_targets_ridge.csv `
+    --n_terms 9 `
+    --solver ridge `
+    --auto_lam `
+    --loocv_ref first_wafer `
+    --coordinate cartesian
+
+# Stage 3: compare both vs truth   -> examples/3_verification/
+python -m wlzpoly.verify `
+    --decomposed_lsq_file ./2_decomposition/decomposed_targets_lsq.csv `
+    --decomposed_ridge_file ./2_decomposition/decomposed_targets_ridge.csv `
     --ground_truth_file ./1_samples/ground_truth.csv `
     --n_terms 9 `
-    --output_folder ./3_verification `
-    --solver lsq ridge `
-    --coordinate cartesian
+    --output_folder ./3_verification
