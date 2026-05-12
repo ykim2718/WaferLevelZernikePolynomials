@@ -61,6 +61,8 @@ from wlzpoly import (
 | `fit_lsq(A, T)` | a_hat = (A^T A)^-1 A^T T |
 | `fit_ridge(A, T, lam)` | a_hat = (A^T A + lam I)^-1 A^T T |
 | `loocv_lambda(A, T, lambdas)` | LOOCV-driven lambda selection |
+| `wlzpoly.decompose.load_wafer_coordinates(wafer_points_file, coordinate)` | Read points JSON into a DataFrame |
+| `wlzpoly.decompose.load_measured_data(target_file)` | Read target CSV into long-format DataFrame |
 
 ## Three-stage demo (after development install)
 
@@ -70,12 +72,21 @@ cd WaferLevelZernikePolynomials
 pip install -e .
 
 cd examples
-python generate_samples.py                       # Stage 1: synthesize wafers
-python -m wlzpoly.decompose --solver lsq         # Stage 2: fit coefficients
-python -m wlzpoly.verify --solver lsq ridge      # Stage 3: compare vs truth
+.\run_demo.ps1                                   # runs all three stages
 ```
 
-Demo outputs land in `examples/{samples,decomposition,verification}/`. Pre-generated copies are visible on the GitHub repo.
+`run_demo.ps1` invokes the three stages in order:
+
+```bash
+python generate_samples.py ...                   # Stage 1: synthesize wafers
+                                                 #   -> samples/target_file.csv,
+                                                 #      samples/ground_truth.csv, ...
+python -m wlzpoly.decompose --target_file ...    # Stage 2: fit Zernike coefficients
+python -m wlzpoly.verify --target_file ...       # Stage 3: compare vs ground truth
+                       --ground_truth_file ...
+```
+
+Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--target_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{samples,decomposition,verification}/`; pre-generated copies are visible on the GitHub repo.
 
 ## Documentation
 

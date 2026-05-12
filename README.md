@@ -62,9 +62,10 @@ WaferLevelZernikePolynomials/
 │       └── verify.py          ← Stage 3: verification + visualization
 │
 └── examples/                  ← demo (NOT installed via pip)
-    ├── config.json            ← settings (scenarios, drift, decomposition)
+    ├── config.json            ← generate_samples settings (scenarios, drift)
     ├── points_13.json         ← 13-point measurement coordinates
     ├── generate_samples.py    ← Stage 1: synthetic data generation
+    ├── run_demo.ps1           ← runs all three stages end-to-end
     ├── samples/               ← Stage 1 outputs (committed for browsing)
     ├── decomposition/         ← Stage 2 outputs
     └── verification/          ← Stage 3 outputs
@@ -74,7 +75,7 @@ Pre-generated demo outputs are kept under `examples/{samples,decomposition,verif
 
 | Output folder | Files produced |
 |---|---|
-| `samples/` | `points_13.json`, `samples.csv` (id + P1..P13), `ground_truth.csv` (id + scenario + a1..a9), `wafer_maps.png`, `measurement_plot.png` |
+| `samples/` | `points_13.json` (copy), `target_file.csv` (id + P1..P13), `ground_truth.csv` (id + scenario + a1..a9), `wafer_maps.png`, `measurement_plot.png` |
 | `decomposition/` | `decomposed_samples.csv` (id + a1..a9) |
 | `verification/` | `decomposition_results.csv` (truth vs lsq vs ridge), `decomposition_summary_lsq.png`, `decomposition_summary_ridge.png` |
 
@@ -92,24 +93,47 @@ pip install -e .
 
 ### Three-stage demo workflow
 
-Run from inside the `examples/` folder (the working directory anchors `config.json` and `points_13.json`).
+The easiest path is the bundled PowerShell runner. From inside `examples/`:
+
+```powershell
+.\run_demo.ps1
+```
+
+This runs Stage 1 → 2 → 3 sequentially with the correct flags. Outputs land in `examples/samples/`, `examples/decomposition/`, and `examples/verification/`.
+
+To call each stage manually (run from inside `examples/`):
 
 ```bash
 cd examples
 
 # Stage 1: generate synthetic measurement data
-python generate_samples.py
+python generate_samples.py `
+    --working_folder . `
+    --config_json config.json `
+    --wafer_points points_13.json `
+    --output_folder ./samples
 
-# Stage 2: Zernike fitting -> recover 9 coefficients (LSQ or Ridge)
-python -m wlzpoly.decompose --solver lsq
+# Stage 2: Zernike fitting -> recover N coefficients (LSQ or Ridge)
+python -m wlzpoly.decompose `
+    --working_folder . `
+    --wafer_points ./samples/points_13.json `
+    --target_file ./samples/target_file.csv `
+    --n_terms 9 `
+    --output_folder ./decomposition `
+    --solver lsq
 
-# Stage 3: compare against ground truth + visualize (default: LSQ + Ridge)
-python -m wlzpoly.verify
-python -m wlzpoly.verify --solver lsq          # LSQ only
-python -m wlzpoly.verify --solver lsq ridge    # both (explicit)
+# Stage 3: compare against ground truth + visualize (LSQ + Ridge)
+python -m wlzpoly.verify `
+    --working_folder . `
+    --wafer_points ./samples/points_13.json `
+    --target_file ./samples/target_file.csv `
+    --ground_truth_file ./samples/ground_truth.csv `
+    --n_terms 9 `
+    --output_folder ./verification `
+    --solver lsq ridge
 ```
 
-The stages must be run in order — each one consumes the previous stage's output. Outputs land in `examples/samples/`, `examples/decomposition/`, and `examples/verification/`.
+The stages must be run in order — each one consumes the previous stage's output. `wlzpoly.decompose` and `wlzpoly.verify` no longer read `config.json`; every parameter is exposed as a CLI flag.
 
 ### Public API
 
@@ -125,8 +149,8 @@ from wlzpoly import (
 
 ```
                       ┌──────────────────┐
-                      │ config.json      │  settings
-                      │ points_13.json   │  coordinates
+                      │ config.json      │  Stage 1 only
+                      │ points_13.json   │  measurement layout
                       └────────┬─────────┘
                                │
                                ▼
@@ -136,15 +160,20 @@ from wlzpoly import (
                                │
                                ▼
                        ┌─────────────┐
-                       │  samples/   │
+                       │  samples/   │  target_file.csv +
+                       │             │  ground_truth.csv +
+                       │             │  points_13.json
                        └──────┬──────┘
-                              │
+                              │  (target_file, wafer_points,
+                              │   ground_truth via CLI flags)
               ┌───────────────┴────────────────┐
               │                                │
               ▼                                ▼
     ┌──────────────────┐             ┌─────────────────┐
     │ decompose.py     │             │   verify.py     │
     │  ② fitting       │             │  ③ verify + viz │
+    │  (--n_terms)     │             │  (--n_terms,    │
+    │                  │             │   --loocv_lambdas)│
     └─────────┬────────┘             └────────┬────────┘
               │                                │
               ▼                                ▼
@@ -186,9 +215,9 @@ from wlzpoly.decompose import load_wafer_coordinates, load_measured_data
 from wlzpoly import WaferLevelZernikePolynomials
 
 coords_df = load_wafer_coordinates(
-    samples_folder="samples", coordinate="cartesian",
+    wafer_points_file="points_13.json", coordinate="cartesian",
 )
-df_measured = load_measured_data(samples_folder="samples")
+df_measured = load_measured_data(target_file="samples/target_file.csv")
 
 wlz = WaferLevelZernikePolynomials(
     coords_df=coords_df,
@@ -272,7 +301,7 @@ Generates synthetic wafer data.
 
 **Outputs (`samples/`)**:
 - `points_13.json` — copy of the input (consumed by later stages)
-- `samples.csv` — id + P1..P13 (same shape as real metrology output)
+- `target_file.csv` — id + P1..P13 (same shape as real metrology output)
 - `ground_truth.csv` — id + scenario + a1..a9 (verification answer key)
 - `wafer_maps.png` — heatmaps of all six scenarios
 - `measurement_plot.png` — 13-point measurement inspection
@@ -298,17 +327,17 @@ General-purpose linear-regression solvers (no Zernike dependency).
 
 Recovers 9 Zernike coefficients from the 13-point measurements (LSQ fitting).
 
-**Inputs (`samples/`)**: `points_13.json`, `samples.csv`
+**Inputs (`samples/`)**: `points_13.json`, `target_file.csv`
 
 **Outputs (`decomposition/`)**:
 - `decomposed_samples.csv` — id + a1..a9 (production-shaped output)
 
 **Provided functions** (also imported by `verify.py`):
-- `load_wafer_coordinates(*, samples_folder, coordinate)` →
+- `load_wafer_coordinates(*, wafer_points_file, coordinate)` →
   `pd.DataFrame` (index=`point_id`, columns `x, y` or `r, theta`).
   When `--coordinate cartesian` only x and y are read; for `polar` only r and theta.
   `df.attrs['wafer_radius_mm']` is populated.
-- `load_measured_data(*, samples_folder)` →
+- `load_measured_data(*, target_file)` →
   `pd.DataFrame` (index=`MultiIndex(wafer_id, point_id)`, columns `['T']`).
   **Coordinates are not merged in** — measurements only.
 
@@ -328,7 +357,7 @@ Recovers 9 Zernike coefficients from the 13-point measurements (LSQ fitting).
 
 Compares LSQ and Ridge fitting results against the ground truth.
 
-**Inputs (`samples/`)**: `points_13.json`, `samples.csv`, `ground_truth.csv`
+**Inputs (`samples/`)**: `points_13.json`, `target_file.csv`, `ground_truth.csv`
 
 **Outputs (`verification/`)**:
 - `decomposition_results.csv` — id + scenario + truth/lsq/ridge × 9 = 27 columns + 2 metadata
@@ -357,9 +386,10 @@ python generate_samples.py [options]
 | `--noise_sigma`, `-n` | 5.0 | Gaussian noise standard deviation |
 | `--seed`, `-s` | 42 | Random seed |
 | `--n_drift` | 30 | Number of wafers in the drift time series |
-| `--config` | config.json | Config path |
-| `--points` | points_13.json | Measurement-point definition path |
-| `--out_folder` | ./samples | Output folder |
+| `--working_folder` | `Path(__file__).parent` | Base folder for resolving `--config_json` and `--wafer_points` |
+| `--config_json` | `"config.json"` | Config JSON (resolved under `--working_folder` if relative) |
+| `--wafer_points` | `"wafer_points.json"` | Wafer-points JSON (resolved under `--working_folder` if relative) |
+| `--output_folder` | `Path(__file__).parent / "samples"` | Output folder |
 
 **Examples**:
 ```bash
@@ -375,9 +405,11 @@ python -m wlzpoly.decompose [options]
 
 | Option | Default | Description |
 |---|---|---|
-| `--samples_folder` | ./samples | Input folder |
-| `--out_folder` | ./decomposition | Output folder |
-| `--config` | config.json | Config path |
+| `--working_folder` | `Path.cwd()` | Base folder for resolving `--wafer_points` |
+| `--wafer_points` | `"wafer_points.json"` | Wafer-points JSON (resolved under `--working_folder` if relative) |
+| `--target_file` | `"target_file.csv"` | Measurement CSV (id + P1..PN) |
+| `--n_terms` | 9 | Number of Zernike polynomial terms (Noll j=1..n_terms) to fit; must be ≤ number of measurement points |
+| `--output_folder` | `Path.cwd() / "decomposition"` | Output folder |
 | `--solver` | lsq | `lsq` or `ridge` |
 | `--lam` | 0.01 | Ridge regularization (used when solver=ridge) |
 | `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
@@ -390,9 +422,14 @@ python -m wlzpoly.verify [options]
 
 | Option | Default | Description |
 |---|---|---|
-| `--samples_folder` | ./samples | Input folder |
-| `--output_folder` | ./verification | Output folder |
-| `--config_json` | config.json | Config path |
+| `--working_folder` | `Path.cwd()` | Base folder for resolving `--wafer_points` |
+| `--wafer_points` | `"wafer_points.json"` | Wafer-points JSON (resolved under `--working_folder` if relative) |
+| `--target_file` | `"target_file.csv"` | Measurement CSV (id + P1..PN) |
+| `--ground_truth_file` | `"ground_truth_file.csv"` | Ground-truth CSV (id, scenario, a1..aN) |
+| `--n_terms` | 9 | Number of Zernike polynomial terms (Noll j=1..n_terms); max is point count of `--wafer_points` |
+| `--loocv_lambdas` | `[0.0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]` | Candidate λ values tried during LOOCV (Ridge only) |
+| `--scenarios_to_show` | auto (all non-`drift` scenarios) | Scenario labels to include in per-scenario tables/charts |
+| `--output_folder` | `Path.cwd() / "verification"` | Output folder |
 | `--solver` | lsq ridge | Solver(s) to run (`lsq`, `ridge`, or `lsq ridge`) |
 | `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
 
@@ -410,6 +447,8 @@ The RMSE difference between the two modes is at the 4th-decimal level (e.g. a1 L
 ## Configuration files
 
 ### `config.json`
+
+Used **only by `generate_samples.py` (Stage 1)** for synthetic-data generation. `wlzpoly.decompose` and `wlzpoly.verify` do not read it — their per-run knobs (`n_terms`, `loocv_lambdas`, `scenarios_to_show`) are CLI flags instead.
 
 ```json
 {
@@ -454,13 +493,14 @@ The RMSE difference between the two modes is at the 4th-decimal level (e.g. a1 L
 }
 ```
 
-| Section | Meaning |
-|---|---|
-| `wafer` | Wafer size + edge exclusion + fitting radius |
-| `scenarios` | Six ground-truth scenarios (a₁..a₉ coefficients) |
-| `drift_series` | Time-series drift parameters (decay + random walk σ) |
-| `decomposition` | Fitting order, LOOCV λ candidates, scenarios to display |
-| `zernike_names` | (n, m) → optical standard names (Piston, Tilt X, …) |
+| Section | Used by | Meaning |
+|---|---|---|
+| `wafer` | (informational) | Wafer size + edge exclusion + fitting radius |
+| `scenarios` | Stage 1 | Six ground-truth scenarios (a₁..a₉ coefficients) |
+| `drift_series` | Stage 1 | Time-series drift parameters (decay + random walk σ) |
+| `decomposition.n_terms` | Stage 1 | Zernike order for ground-truth generation. Stage 2/3 use `--n_terms` CLI instead |
+| `decomposition.loocv_lambdas`, `scenarios_to_show` | (legacy) | No longer read by Stage 2/3 — use `--loocv_lambdas` / `--scenarios_to_show` CLI flags |
+| `zernike_names` | (legacy) | No longer read by Stage 2/3 — the standard (n, m) → name map is hardcoded in `wlzpoly.verify` |
 
 ### `points_13.json`
 
@@ -490,7 +530,7 @@ The 13-point layout:
 
 ## Output files explained
 
-### `samples.csv` (Stage 1 output)
+### `target_file.csv` (Stage 1 output)
 
 ```
 id,P1,P2,P3,...,P13
@@ -584,16 +624,23 @@ Total: 36 wafers = 6 scenarios + 30 drift samples (drift = a₁ decay + a₄ dee
 
 ### Change noise strength
 
+Edit `run_demo.ps1` Stage 1 line — change `--noise_sigma 5.0` to the desired value — then `.\run_demo.ps1`. Or call manually (run from `examples/`):
+
 ```bash
 # Low noise (LSQ recovers near-perfectly)
-python generate_samples.py --noise_sigma 0.4
-python -m wlzpoly.decompose
-python -m wlzpoly.verify
+python generate_samples.py --working_folder . --config_json config.json \
+    --wafer_points points_13.json --output_folder ./samples --noise_sigma 0.4
 
-# High noise (LSQ wobbles, Ridge stabilizes)
-python generate_samples.py --noise_sigma 10
-python -m wlzpoly.decompose
-python -m wlzpoly.verify
+python -m wlzpoly.decompose --working_folder . \
+    --wafer_points ./samples/points_13.json \
+    --target_file ./samples/target_file.csv \
+    --output_folder ./decomposition --n_terms 9 --solver lsq
+
+python -m wlzpoly.verify --working_folder . \
+    --wafer_points ./samples/points_13.json \
+    --target_file ./samples/target_file.csv \
+    --ground_truth_file ./samples/ground_truth.csv \
+    --output_folder ./verification --n_terms 9 --solver lsq ridge
 ```
 
 ### Add a new scenario
@@ -614,16 +661,18 @@ No code change required.
 
 ### Extend the Zernike order
 
-Edit `n_terms` in `config.json`:
+Two places matter:
 
-```json
-"decomposition": {
-  "n_terms": 11,
-  ...
-}
+1. **Stage 1** (ground-truth generation): bump `cfg["decomposition"]["n_terms"]` in `config.json` so `ground_truth.csv` carries `a1..a11` instead of `a1..a9`.
+
+2. **Stage 2 / 3** (fitting + verification): pass `--n_terms 11` on the CLI. The flag is the only authority for the fitter — neither module reads `config.json`.
+
+```bash
+python -m wlzpoly.decompose ... --n_terms 11
+python -m wlzpoly.verify    ... --n_terms 11
 ```
 
-(From 9 to 11 — note that 13 measurement points may not have enough degrees of freedom; aim for ≥ 4 residual DOF.)
+Maximum `n_terms` is the number of measurement points (13 here). Exceeding it makes `AᵀA` singular and the coefficients diverge — leave at least 4 residual DOF for stable fits.
 
 ### Change the measurement layout
 

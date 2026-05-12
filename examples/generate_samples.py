@@ -13,7 +13,7 @@ Configuration sources
 Outputs (under ./samples/)
 --------------------------
     points_13.json       -- copy of the input, beside the data
-    samples.csv          -- id + P1..P13 (mimics metrology)
+    target_file.csv      -- id + P1..P13 (mimics metrology)
     ground_truth.csv     -- id, scenario, a1..aN (verification)
     wafer_maps.png       -- 2x3 grid of true wafer maps
     measurement_plot.png -- 13-point measurements vs true field
@@ -30,17 +30,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from wlzpoly.decompose import (
-    GROUND_TRUTH_CSV_FILENAME,
-    POINTS_JSON_FILENAME,
-    SAMPLES_CSV_FILENAME,
-)
 from wlzpoly import ZernikePolynomials
 
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-POINTS_PATH = Path(__file__).parent / POINTS_JSON_FILENAME
+WORKING_FOLDER_DEFAULT = Path(__file__).parent
+CONFIG_FILENAME_DEFAULT = "config.json"
+WAFER_POINTS_FILENAME_DEFAULT = "wafer_points.json"
 OUT_FOLDER_DEFAULT = Path(__file__).parent / "samples"
+
+# Output filenames written by this script.  Stage 2 (decompose) reads
+# TARGET_CSV_FILENAME via its --target_file flag, and Stage 3 (verify)
+# reads GROUND_TRUTH_CSV_FILENAME via its --ground_truth_file flag.
+# POINTS_JSON_FILENAME is a copy of the input wafer-points JSON placed
+# next to the generated CSVs for downstream convenience.
+POINTS_JSON_FILENAME = "points_13.json"
+TARGET_CSV_FILENAME = "target_file.csv"
+GROUND_TRUTH_CSV_FILENAME = "ground_truth.csv"
+
+
+def _resolve_under(p, base):
+    """If `p` is absolute, return as-is; else join under `base`."""
+    p = Path(p)
+    base = Path(base)
+    return p if p.is_absolute() else base / p
 
 # Default Gaussian noise stddev. Kept consistent across the function
 # library defaults and the CLI default so callers see one value
@@ -76,7 +88,7 @@ def _drift_shape_indices(n_terms: int) -> Tuple[int, ...]:
 # -------------------------------------------------------------
 # 1. Configuration loading
 # -------------------------------------------------------------
-def load_config(path: Path = CONFIG_PATH) -> Dict[str, Any]:
+def load_config(path: Path) -> Dict[str, Any]:
     """Load the project config JSON."""
     assert isinstance(path, (str, Path)), (
         f"path must be str/Path, got {type(path).__name__}"
@@ -85,8 +97,8 @@ def load_config(path: Path = CONFIG_PATH) -> Dict[str, Any]:
         return json.load(f)
 
 
-def load_points(path: Path = POINTS_PATH) -> Dict[str, Any]:
-    """Load the 13-point coordinate definition JSON."""
+def load_points(path: Path) -> Dict[str, Any]:
+    """Load the wafer measurement-point JSON."""
     assert isinstance(path, (str, Path)), (
         f"path must be str/Path, got {type(path).__name__}"
     )
@@ -310,7 +322,7 @@ def save_dataset(
     out_folder: Path,
     n_terms: int,
 ) -> None:
-    """Write points_13.json copy, samples.csv, and ground_truth.csv."""
+    """Write points_13.json copy, target_file.csv, and ground_truth.csv."""
     assert isinstance(points_def, dict), (
         f"points_def must be dict, got {type(points_def).__name__}"
     )
@@ -334,7 +346,7 @@ def save_dataset(
 
     # ---- Measurement-only CSV ----
     point_ids = [p["id"] for p in points_def["points"]]
-    with (out / SAMPLES_CSV_FILENAME).open("w", newline="") as f:
+    with (out / TARGET_CSV_FILENAME).open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["id"] + point_ids)
         for s in samples:
@@ -507,11 +519,13 @@ def main(args: argparse.Namespace) -> None:
     assert isinstance(args, argparse.Namespace), (
         f"args must be Namespace, got {type(args).__name__}"
     )
-    cfg = load_config(path=args.config)
-    points_def = load_points(path=args.points)
+    config_path = _resolve_under(args.config_json, args.working_folder)
+    points_path = _resolve_under(args.wafer_points, args.working_folder)
+    cfg = load_config(path=config_path)
+    points_def = load_points(path=points_path)
     n_terms = cfg["decomposition"]["n_terms"]
 
-    out_folder = args.out_folder
+    out_folder = args.output_folder
     samples = build_dataset(
         cfg=cfg,
         points_def=points_def,
@@ -539,14 +553,18 @@ def main(args: argparse.Namespace) -> None:
         n_show=6,
     )
 
+    print("=" * 70)
     print(
-        f"Generated {len(samples)} samples -> {out_folder.resolve()}"
+        f"[generate_samples] Generated {len(samples)} samples "
+        f"-> {out_folder.resolve()}"
     )
-    print(f"  config       = {args.config}")
-    print(f"  points       = {args.points}")
-    print(f"  noise_sigma  = {args.noise_sigma}")
+    print("=" * 70)
+    print(f"  working_folder = {Path(args.working_folder).resolve()}")
+    print(f"  config_json    = {config_path}")
+    print(f"  wafer_points   = {points_path}")
+    print(f"  noise_sigma    = {args.noise_sigma}")
     print("  - points_13.json     (point definition)")
-    print("  - samples.csv        (id + P1..P13)")
+    print("  - target_file.csv    (id + P1..P13)")
     print(f"  - ground_truth.csv   (id, scenario, a1..a{n_terms})")
     print("  - wafer_maps.png     (scenario maps)")
     print("  - measurement_plot.png  (per-sample inspection)")
@@ -593,16 +611,28 @@ def parse_args() -> argparse.Namespace:
         help="Number of drift-series wafers (default: 30)",
     )
     parser.add_argument(
-        "--config", type=Path, default=CONFIG_PATH,
-        help=f"Config JSON path (default: {CONFIG_PATH.name})",
+        "--working_folder", type=Path,
+        default=WORKING_FOLDER_DEFAULT,
+        help='Base folder for resolving relative paths of '
+             '--config_json and --wafer_points '
+             '(default: Path.cwd())',
     )
     parser.add_argument(
-        "--points", type=Path, default=POINTS_PATH,
-        help=f"Points JSON path (default: {POINTS_PATH.name})",
+        "--config_json", type=Path,
+        default=CONFIG_FILENAME_DEFAULT,
+        help='Config JSON filename or path. If relative, resolved '
+             'under --working_folder. (default: "config.json")',
     )
     parser.add_argument(
-        "--out_folder", type=Path, default=OUT_FOLDER_DEFAULT,
-        help="Output folder (default: ./samples)",
+        "--wafer_points", type=Path,
+        default=WAFER_POINTS_FILENAME_DEFAULT,
+        help='Wafer measurement-point JSON. If relative, resolved '
+             'under --working_folder. (default: "wafer_points.json")',
+    )
+    parser.add_argument(
+        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
+        help='Output folder '
+             '(default: Path(__file__).parent / "samples")',
     )
     return parser.parse_args()
 

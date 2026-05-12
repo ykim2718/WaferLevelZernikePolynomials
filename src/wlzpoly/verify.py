@@ -23,7 +23,6 @@ Outputs (under ./verification/)
 
 import argparse
 import csv
-import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Union
 
@@ -32,7 +31,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .decompose import (
-    GROUND_TRUTH_CSV_FILENAME,
+    _resolve_under,
     load_measured_data,
     load_wafer_coordinates,
 )
@@ -51,9 +50,30 @@ from .zernike_polynomials import (
 )
 
 
-CONFIG_PATH = Path.cwd() / "config.json"
-SAMPLES_FOLDER_DEFAULT = Path.cwd() / "samples"
+WORKING_FOLDER_DEFAULT = Path.cwd()
+WAFER_POINTS_FILENAME_DEFAULT = "wafer_points.json"
+TARGET_FILE_DEFAULT = "target_file.csv"
+GROUND_TRUTH_FILE_DEFAULT = "ground_truth_file.csv"
+N_TERMS_DEFAULT = 9
+LOOCV_LAMBDAS_DEFAULT = [0.0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
 OUT_FOLDER_DEFAULT = Path.cwd() / "verification"
+
+# Standard Zernike polynomial names by Noll (n, m). Used for column
+# headers / chart labels when no override is supplied. Any (n, m) not
+# listed here falls back to "Z(n,m)" via make_name_lookup().
+ZERNIKE_NAMES_DEFAULT: Dict[tuple, str] = {
+    (0, 0):  "Piston",
+    (1, 1):  "Tilt X",
+    (1, -1): "Tilt Y",
+    (2, 0):  "Defocus",
+    (2, -2): "Astig 45",
+    (2, 2):  "Astig 0",
+    (3, -1): "Coma Y",
+    (3, 1):  "Coma X",
+    (3, -3): "Trefoil Y",
+    (3, 3):  "Trefoil X",
+    (4, 0):  "Spherical",
+}
 
 # Plot styling constants
 COLOR_TRUTH = "#1E2761"
@@ -63,26 +83,23 @@ PISTON_YZOOM = 5.0   # +/- range around truth for Piston (a1) y-axis
 
 
 # -------------------------------------------------------------
-# 0. Name lookup - config-driven
+# 0. Name lookup
 # -------------------------------------------------------------
-def make_name_lookup(cfg: Dict[str, Any]) -> Callable[[int], str]:
+def make_name_lookup(
+    names_by_nm: Dict[tuple, str] = ZERNIKE_NAMES_DEFAULT,
+) -> Callable[[int], str]:
     """Build a function j -> human-readable name.
 
-    Looks up cfg['zernike_names'] keyed as 'n,m' strings; falls back to
-    'Z(n,m)' if a particular pair is not configured.
+    Looks up (n, m) in `names_by_nm`; falls back to 'Z(n,m)' if a
+    particular pair is not configured.
     """
-    assert isinstance(cfg, dict), (
-        f"cfg must be dict, got {type(cfg).__name__}"
+    assert isinstance(names_by_nm, dict), (
+        f"names_by_nm must be dict, got {type(names_by_nm).__name__}"
     )
-    raw = cfg.get("zernike_names", {})
-    name_by_nm: Dict[tuple, str] = {}
-    for k, v in raw.items():
-        n_str, m_str = k.split(",")
-        name_by_nm[(int(n_str), int(m_str))] = v
 
     def name(j: int) -> str:
         n, m = ZernikePolynomials.nm_from_noll(j=j)
-        return name_by_nm.get((n, m), f"Z({n},{m})")
+        return names_by_nm.get((n, m), f"Z({n},{m})")
     return name
 
 
@@ -90,21 +107,20 @@ def make_name_lookup(cfg: Dict[str, Any]) -> Callable[[int], str]:
 # 1. Ground-truth loading
 # -------------------------------------------------------------
 def load_ground_truth(
-    samples_folder: Union[str, Path],
+    ground_truth_file: Union[str, Path],
     *,
     n_terms: int,
 ) -> Dict[str, Dict[str, Any]]:
     """Load ground_truth.csv into {id: {scenario, truth (np.ndarray)}}."""
-    assert isinstance(samples_folder, (str, Path)), (
-        f"samples_folder must be str/Path, got "
-        f"{type(samples_folder).__name__}"
+    assert isinstance(ground_truth_file, (str, Path)), (
+        f"ground_truth_file must be str/Path, got "
+        f"{type(ground_truth_file).__name__}"
     )
     assert isinstance(n_terms, int), (
         f"n_terms must be int, got {type(n_terms).__name__}"
     )
-    samples_folder = Path(samples_folder)
     truth_map: Dict[str, Dict[str, Any]] = {}
-    with (samples_folder / GROUND_TRUTH_CSV_FILENAME).open() as f:
+    with Path(ground_truth_file).open() as f:
         rdr = csv.DictReader(f)
         for row in rdr:
             truth_map[row["id"]] = {
@@ -122,26 +138,55 @@ def load_ground_truth(
 # -------------------------------------------------------------
 def verify(
     *,
-    cfg: Dict[str, Any],
-    samples_folder: Union[str, Path],
+    wafer_points_file: Union[str, Path],
+    target_file: Union[str, Path],
+    ground_truth_file: Union[str, Path],
     out_folder: Union[str, Path],
     solvers: List[SolverLiteral],
+    n_terms: int = N_TERMS_DEFAULT,
+    loocv_lambdas: List[float] = None,
+    scenarios_to_show: List[str] = None,
+    zernike_names: Dict[tuple, str] = None,
     coordinate: CoordinateLiteral = "cartesian",
 ) -> List[Dict[str, Any]]:
     """Compare selected solver fits against ground truth.
 
-    Uses config.json for n_terms, lam candidate list, and which scenarios
-    to display. Only runs solvers listed in `solvers`.
+    Parameters
+    ----------
+    n_terms : Zernike order (Noll j=1..n_terms).
+    loocv_lambdas : candidate lambdas for LOOCV (used when 'ridge' is in
+        solvers). Defaults to LOOCV_LAMBDAS_DEFAULT.
+    scenarios_to_show : scenario labels to include in the per-scenario
+        table/charts. None => every unique scenario from ground_truth
+        except 'drift'.
+    zernike_names : (n, m) -> readable name map for labels.
+        None => ZERNIKE_NAMES_DEFAULT.
 
-    `coordinate` selects which fields of points_13.json to read; passed
-    to load_measured_data and basis_matrix_from_data.
+    `coordinate` selects which fields of the wafer-points JSON to read.
     """
-    assert isinstance(cfg, dict), (
-        f"cfg must be dict, got {type(cfg).__name__}"
+    if loocv_lambdas is None:
+        loocv_lambdas = list(LOOCV_LAMBDAS_DEFAULT)
+    if zernike_names is None:
+        zernike_names = ZERNIKE_NAMES_DEFAULT
+
+    assert isinstance(n_terms, int), (
+        f"n_terms must be int, got {type(n_terms).__name__}"
     )
-    assert isinstance(samples_folder, (str, Path)), (
-        f"samples_folder must be str/Path, got "
-        f"{type(samples_folder).__name__}"
+    assert isinstance(loocv_lambdas, list), (
+        f"loocv_lambdas must be list, got "
+        f"{type(loocv_lambdas).__name__}"
+    )
+    assert isinstance(wafer_points_file, (str, Path)), (
+        f"wafer_points_file must be str/Path, got "
+        f"{type(wafer_points_file).__name__}"
+    )
+    assert isinstance(target_file, (str, Path)), (
+        f"target_file must be str/Path, got "
+        f"{type(target_file).__name__}"
+    )
+    assert isinstance(ground_truth_file, (str, Path)), (
+        f"ground_truth_file must be str/Path, got "
+        f"{type(ground_truth_file).__name__}"
     )
     assert isinstance(out_folder, (str, Path)), (
         f"out_folder must be str/Path, got {type(out_folder).__name__}"
@@ -164,18 +209,29 @@ def verify(
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
 
-    n_terms = cfg["decomposition"]["n_terms"]
-    lambdas = cfg["decomposition"]["loocv_lambdas"]
-    show_scenes = cfg["decomposition"]["scenarios_to_show"]
-    name = make_name_lookup(cfg=cfg)
+    lambdas = loocv_lambdas
+    name = make_name_lookup(names_by_nm=zernike_names)
 
     coords_df = load_wafer_coordinates(
-        samples_folder=samples_folder, coordinate=coordinate,
+        wafer_points_file=wafer_points_file, coordinate=coordinate,
     )
-    df_measured = load_measured_data(samples_folder=samples_folder)
+    df_measured = load_measured_data(target_file=target_file)
     truth_map = load_ground_truth(
-        samples_folder=samples_folder, n_terms=n_terms,
+        ground_truth_file=ground_truth_file, n_terms=n_terms,
     )
+
+    # ---- Determine which scenarios to show in per-scenario tables ----
+    if scenarios_to_show is None:
+        # Default: every unique scenario in ground_truth except 'drift',
+        # in first-seen order.
+        seen = []
+        for gt in truth_map.values():
+            sc = gt["scenario"]
+            if sc != "drift" and sc not in seen:
+                seen.append(sc)
+        show_scenes = seen
+    else:
+        show_scenes = list(scenarios_to_show)
 
     # ---- Build wafer-level ZP (precomputes basis A from coords) ----
     wlz = WaferLevelZernikePolynomials(
@@ -491,23 +547,65 @@ def plot_summary(
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Verify Zernike decomposition results."
+        description="Verify Zernike decomposition results.",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "--samples_folder", type=Path,
-        default=SAMPLES_FOLDER_DEFAULT,
+        "--working_folder", type=Path,
+        default=WORKING_FOLDER_DEFAULT,
+        help='Base folder for resolving the relative path of '
+             '--wafer_points. (default: Path.cwd())',
+    )
+    parser.add_argument(
+        "--wafer_points", type=Path,
+        default=WAFER_POINTS_FILENAME_DEFAULT,
+        help='Wafer measurement-point JSON. If relative, resolved '
+             'under --working_folder. (default: "wafer_points.json")',
+    )
+    parser.add_argument(
+        "--target_file", type=Path, default=TARGET_FILE_DEFAULT,
+        help='Path to the measurement CSV (id + P1..PN). If relative, '
+             'resolved against the current working directory. '
+             '(default: "target_file.csv")',
+    )
+    parser.add_argument(
+        "--ground_truth_file", type=Path,
+        default=GROUND_TRUTH_FILE_DEFAULT,
+        help='Path to the ground-truth CSV (id, scenario, a1..aN). '
+             'If relative, resolved against the current working '
+             'directory. (default: "ground_truth_file.csv")',
+    )
+    parser.add_argument(
+        "--n_terms", type=int, default=N_TERMS_DEFAULT,
         help=(
-            "Folder holding samples.csv, points_13.json, "
-            "and ground_truth.csv"
+            'Number of Zernike polynomial terms (Noll j=1..n_terms).\n'
+            'Names by j:\n'
+            '   1  Piston       2  Tilt X       3  Tilt Y\n'
+            '   4  Defocus      5  Astig 45     6  Astig 0\n'
+            '   7  Coma Y       8  Coma X       9  Trefoil Y\n'
+            '  10  Trefoil X   11  Spherical   ...\n'
+            'Max: number of points in --wafer_points '
+            '(exceeding is meaningless -- A^T A becomes singular).\n'
+            f'(default: {N_TERMS_DEFAULT})'
         ),
     )
     parser.add_argument(
-        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
-        help="Folder to write outputs into (default: verification)",
+        "--loocv_lambdas", type=float, nargs="+",
+        default=LOOCV_LAMBDAS_DEFAULT,
+        help='Candidate Ridge lambdas tried during LOOCV (only used '
+             "when 'ridge' is among --solver). "
+             f'(default: {LOOCV_LAMBDAS_DEFAULT})',
     )
     parser.add_argument(
-        "--config_json", type=Path, default=CONFIG_PATH,
-        help=f"Config JSON path (default: {CONFIG_PATH.name})",
+        "--scenarios_to_show", type=str, nargs="+", default=None,
+        help='Scenario labels to include in the per-scenario tables '
+             'and charts. Omit to use every unique scenario from '
+             "ground_truth except 'drift'. (default: auto)",
+    )
+    parser.add_argument(
+        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
+        help='Folder to write outputs into '
+             '(default: Path.cwd() / "verification")',
     )
     parser.add_argument(
         "--solver", nargs="+", choices=SOLVER_CHOICES,
@@ -530,20 +628,33 @@ if __name__ == "__main__":
     assert isinstance(args, argparse.Namespace), (
         f"args must be Namespace, got {type(args).__name__}"
     )
-    with Path(args.config_json).open() as f:
-        cfg = json.load(f)
+    wafer_points_path = _resolve_under(
+        args.wafer_points, args.working_folder,
+    )
+    target_path = Path(args.target_file).resolve()
+    ground_truth_path = Path(args.ground_truth_file).resolve()
 
-    print(f"Reading from : {args.samples_folder.resolve()}")
-    print(f"Writing to   : {args.output_folder.resolve()}")
-    print(f"Config       : {args.config_json}")
-    print(f"Solvers      : {args.solver}")
-    print(f"Coordinate   : {args.coordinate}")
+    print("=" * 70)
+    print("[verify] arguments")
+    print("=" * 70)
+    print(f"  Working folder : {Path(args.working_folder).resolve()}")
+    print(f"  Wafer points   : {wafer_points_path}")
+    print(f"  Target file    : {target_path}")
+    print(f"  Ground truth   : {ground_truth_path}")
+    print(f"  Output folder  : {args.output_folder.resolve()}")
+    print(f"  n_terms        : {args.n_terms}")
+    print(f"  Solvers        : {args.solver}")
+    print(f"  Coordinate     : {args.coordinate}")
     print()
 
     verify(
-        cfg=cfg,
-        samples_folder=args.samples_folder,
+        wafer_points_file=wafer_points_path,
+        target_file=target_path,
+        ground_truth_file=ground_truth_path,
         out_folder=args.output_folder,
         solvers=args.solver,
+        n_terms=args.n_terms,
+        loocv_lambdas=args.loocv_lambdas,
+        scenarios_to_show=args.scenarios_to_show,
         coordinate=args.coordinate,
     )

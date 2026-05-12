@@ -34,16 +34,18 @@ from .zernike_polynomials import (
 )
 
 
-CONFIG_PATH_DEFAULT = Path.cwd() / "config.json"
-SAMPLES_FOLDER_DEFAULT = Path.cwd() / "samples"
+WORKING_FOLDER_DEFAULT = Path.cwd()
+WAFER_POINTS_FILENAME_DEFAULT = "wafer_points.json"
+TARGET_FILE_DEFAULT = "target_file.csv"
+N_TERMS_DEFAULT = 9
 OUT_FOLDER_DEFAULT = Path.cwd() / "decomposition"
 
-# File-name contract between generate_samples (writer) and the
-# decompose / verify consumers (readers). Defined here once so all
-# modules agree on the layout under samples_folder.
-POINTS_JSON_FILENAME = "points_13.json"
-SAMPLES_CSV_FILENAME = "samples.csv"
-GROUND_TRUTH_CSV_FILENAME = "ground_truth.csv"
+
+def _resolve_under(p, base):
+    """If `p` is absolute, return as-is; else join under `base`."""
+    p = Path(p)
+    base = Path(base)
+    return p if p.is_absolute() else base / p
 
 
 # -------------------------------------------------------------
@@ -51,10 +53,10 @@ GROUND_TRUTH_CSV_FILENAME = "ground_truth.csv"
 # -------------------------------------------------------------
 def load_wafer_coordinates(
     *,
-    samples_folder: Union[str, Path],
+    wafer_points_file: Union[str, Path],
     coordinate: CoordinateLiteral = "cartesian",
 ) -> pd.DataFrame:
-    """Read point coordinates from points_13.json.
+    """Read point coordinates from a wafer-points JSON file.
 
     Reads ONLY the fields requested by `coordinate` (no cross-field
     fallback). Returns a DataFrame indexed by point_id with the chosen
@@ -62,8 +64,9 @@ def load_wafer_coordinates(
 
     Parameters
     ----------
-    samples_folder : Path
-        Folder containing points_13.json.
+    wafer_points_file : Path
+        Path to the JSON file describing measurement points
+        (commonly wafer_points.json or points_13.json).
     coordinate : "cartesian" or "polar"
         - "cartesian": read only ('x', 'y') from each point.
         - "polar":     read only ('r', 'theta') from each point.
@@ -99,9 +102,9 @@ def load_wafer_coordinates(
           ]
         }
     """
-    assert isinstance(samples_folder, (str, Path)), (
-        f"samples_folder must be str/Path, got "
-        f"{type(samples_folder).__name__}"
+    assert isinstance(wafer_points_file, (str, Path)), (
+        f"wafer_points_file must be str/Path, got "
+        f"{type(wafer_points_file).__name__}"
     )
     assert isinstance(coordinate, str), (
         f"coordinate must be str, got {type(coordinate).__name__}"
@@ -111,8 +114,7 @@ def load_wafer_coordinates(
         f"got {coordinate!r}"
     )
 
-    samples_folder = Path(samples_folder)
-    with (samples_folder / POINTS_JSON_FILENAME).open() as f:
+    with Path(wafer_points_file).open() as f:
         pts_def = json.load(f)
     pts = pts_def["points"]
 
@@ -139,9 +141,9 @@ def load_wafer_coordinates(
 
 def load_measured_data(
     *,
-    samples_folder: Union[str, Path],
+    target_file: Union[str, Path],
 ) -> pd.DataFrame:
-    """Read samples.csv into a long-format DataFrame (T values only).
+    """Read the measurement CSV into a long-format DataFrame (T only).
 
     Coordinates are NOT merged in - call `load_wafer_coordinates`
     separately and pass coords + measurements together to
@@ -149,8 +151,9 @@ def load_measured_data(
 
     Parameters
     ----------
-    samples_folder : Path
-        Folder containing samples.csv.
+    target_file : Path
+        Path to the CSV with `id, P1, P2, ...` columns (commonly
+        samples.csv or target.csv).
 
     Returns
     -------
@@ -158,13 +161,12 @@ def load_measured_data(
         index   : MultiIndex(['wafer_id', 'point_id'])
         columns : ['T']  (measured thickness per wafer x point)
     """
-    assert isinstance(samples_folder, (str, Path)), (
-        f"samples_folder must be str/Path, got "
-        f"{type(samples_folder).__name__}"
+    assert isinstance(target_file, (str, Path)), (
+        f"target_file must be str/Path, got "
+        f"{type(target_file).__name__}"
     )
 
-    samples_folder = Path(samples_folder)
-    samples_df = pd.read_csv(samples_folder / SAMPLES_CSV_FILENAME)
+    samples_df = pd.read_csv(Path(target_file))
     long_df = (
         samples_df
         .melt(id_vars="id", var_name="point_id", value_name="T")
@@ -180,32 +182,38 @@ def load_measured_data(
 # -------------------------------------------------------------
 def decompose(
     *,
-    samples_folder: Union[str, Path],
+    wafer_points_file: Union[str, Path],
+    target_file: Union[str, Path],
     out_folder: Union[str, Path],
     solver: SolverLiteral = "lsq",
     lam: float = 0.01,
     n_terms: int = 9,
     coordinate: CoordinateLiteral = "cartesian",
 ) -> List[Dict[str, Any]]:
-    """Pure fitting stage: 13 measurements -> N coefficients.
+    """Pure fitting stage: N-point measurements -> N coefficients.
 
     Parameters
     ----------
-    samples_folder : Path holding points_13.json + samples.csv
+    wafer_points_file : Path to the wafer-points JSON
+    target_file : Path to the measurement CSV (id + P1..PN)
     out_folder : where to write decomposed_samples.csv
     solver : "lsq" or "ridge"
     lam : Ridge regularization strength (used if solver="ridge")
     n_terms : number of Zernike terms
-    coordinate : "cartesian" or "polar" - which fields of points_13.json
-        to read (consumed by load_measured_data)
+    coordinate : "cartesian" or "polar" - which fields of the
+        wafer-points JSON to read
 
     Returns
     -------
     list of {id, coeffs (np.ndarray of n_terms)}
     """
-    assert isinstance(samples_folder, (str, Path)), (
-        f"samples_folder must be str/Path, got "
-        f"{type(samples_folder).__name__}"
+    assert isinstance(wafer_points_file, (str, Path)), (
+        f"wafer_points_file must be str/Path, got "
+        f"{type(wafer_points_file).__name__}"
+    )
+    assert isinstance(target_file, (str, Path)), (
+        f"target_file must be str/Path, got "
+        f"{type(target_file).__name__}"
     )
     assert isinstance(out_folder, (str, Path)), (
         f"out_folder must be str/Path, got {type(out_folder).__name__}"
@@ -235,9 +243,9 @@ def decompose(
 
     # ---- File I/O: load coords + measurements separately ----
     coords_df = load_wafer_coordinates(
-        samples_folder=samples_folder, coordinate=coordinate,
+        wafer_points_file=wafer_points_file, coordinate=coordinate,
     )
-    mesured_df = load_measured_data(samples_folder=samples_folder)
+    mesured_df = load_measured_data(target_file=target_file)
 
     print("=" * 70)
     print(f"[decompose] solver = {solver}, n_terms = {n_terms}")
@@ -281,20 +289,48 @@ def decompose(
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Zernike decomposition (fitting stage)."
+        description="Zernike decomposition (fitting stage).",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "--samples_folder", type=Path,
-        default=SAMPLES_FOLDER_DEFAULT,
-        help="Folder holding samples.csv + points_13.json",
+        "--working_folder", type=Path,
+        default=WORKING_FOLDER_DEFAULT,
+        help='Base folder for resolving the relative path of '
+             '--wafer_points. (default: Path.cwd())',
     )
     parser.add_argument(
-        "--out_folder", type=Path, default=OUT_FOLDER_DEFAULT,
-        help="Folder to write outputs into",
+        "--wafer_points", type=Path,
+        default=WAFER_POINTS_FILENAME_DEFAULT,
+        help='Wafer measurement-point JSON. If relative, resolved '
+             'under --working_folder. (default: "wafer_points.json")',
     )
     parser.add_argument(
-        "--config_json", type=Path, default=CONFIG_PATH_DEFAULT,
-        help=f"Config JSON path (default: {CONFIG_PATH_DEFAULT.name})",
+        "--target_file", type=Path, default=TARGET_FILE_DEFAULT,
+        help='Path to the measurement CSV (id + P1..PN). If relative, '
+             'resolved against the current working directory. '
+             '(default: "target_file.csv")',
+    )
+    parser.add_argument(
+        "--n_terms", type=int, default=N_TERMS_DEFAULT,
+        help=(
+            'Number of Zernike polynomial terms (Noll j=1..n_terms) '
+            'to fit.\n'
+            'Names by j:\n'
+            '   1  Piston       2  Tilt X       3  Tilt Y\n'
+            '   4  Defocus      5  Astig 45     6  Astig 0\n'
+            '   7  Coma Y       8  Coma X       9  Trefoil Y\n'
+            '  10  Trefoil X   11  Spherical   ...\n'
+            'Max: number of points in --wafer_points '
+            '(A^T A becomes singular at the max; exceeding it is '
+            'meaningless -- coefficients diverge).\n'
+            'Recommended: leave >= 4 residual DOF for stable fits.\n'
+            f'(default: {N_TERMS_DEFAULT})'
+        ),
+    )
+    parser.add_argument(
+        "--output_folder", type=Path, default=OUT_FOLDER_DEFAULT,
+        help='Folder to write outputs into '
+             '(default: Path.cwd() / "decomposition")',
     )
     parser.add_argument(
         "--solver", type=str, choices=SOLVER_CHOICES, default="lsq",
@@ -320,22 +356,29 @@ if __name__ == "__main__":
     assert isinstance(args, argparse.Namespace), (
         f"args must be Namespace, got {type(args).__name__}"
     )
-    with Path(args.config_json).open() as f:
-        cfg = json.load(f)
+    wafer_points_path = _resolve_under(
+        args.wafer_points, args.working_folder,
+    )
 
-    print(f"Reading from : {args.samples_folder.resolve()}")
-    print(f"Writing to   : {args.out_folder.resolve()}")
-    print(f"Config       : {args.config_json}")
-    print(f"Solver       : {args.solver}")
-    print(f"Coordinate   : {args.coordinate}")
+    print("=" * 70)
+    print("[decompose] arguments")
+    print("=" * 70)
+    print(f"  Working folder : {Path(args.working_folder).resolve()}")
+    print(f"  Wafer points   : {wafer_points_path}")
+    print(f"  Target file    : {Path(args.target_file).resolve()}")
+    print(f"  Output folder  : {args.output_folder.resolve()}")
+    print(f"  n_terms        : {args.n_terms}")
+    print(f"  Solver         : {args.solver}")
+    print(f"  Coordinate     : {args.coordinate}")
     print()
 
     decompose(
-        samples_folder=args.samples_folder,
-        out_folder=args.out_folder,
+        wafer_points_file=wafer_points_path,
+        target_file=args.target_file,
+        out_folder=args.output_folder,
         solver=args.solver,
         lam=args.lam,
-        n_terms=cfg["decomposition"]["n_terms"],
+        n_terms=args.n_terms,
         coordinate=args.coordinate,
     )
 
