@@ -62,22 +62,23 @@ WaferLevelZernikePolynomials/
 │       └── verify.py          ← Stage 3: verification + visualization
 │
 └── examples/                  ← demo (NOT installed via pip)
-    ├── config.json            ← generate_samples settings (scenarios, drift)
-    ├── points_13.json         ← 13-point measurement coordinates
     ├── generate_samples.py    ← Stage 1: synthetic data generation
     ├── run_demo.ps1           ← runs all three stages end-to-end
-    ├── samples/               ← Stage 1 outputs (committed for browsing)
-    ├── decomposition/         ← Stage 2 outputs
-    └── verification/          ← Stage 3 outputs
+    ├── configuration/         ← inputs (settings + measurement layout)
+    │   ├── config.json        ← generate_samples settings (scenarios, drift)
+    │   └── points_13.json     ← 13-point measurement coordinates
+    ├── 1_samples/             ← Stage 1 outputs (committed for browsing)
+    ├── 2_decomposition/       ← Stage 2 outputs
+    └── 3_verification/        ← Stage 3 outputs
 ```
 
-Pre-generated demo outputs are kept under `examples/{samples,decomposition,verification}/` so the figures and CSVs can be browsed directly on the GitHub page. They are excluded from the PyPI sdist via `MANIFEST.in` to keep the installed package lean.
+Pre-generated demo outputs are kept under `examples/{1_samples, 2_decomposition, 3_verification}/` so the figures and CSVs can be browsed directly on the GitHub page. They are excluded from the PyPI sdist via `MANIFEST.in` to keep the installed package lean.
 
 | Output folder | Files produced |
 |---|---|
-| `samples/` | `points_13.json` (copy), `target_file.csv` (id + P1..P13), `ground_truth.csv` (id + scenario + a1..a9), `wafer_maps.png`, `measurement_plot.png` |
-| `decomposition/` | `decomposed_samples.csv` (id + a1..a9) |
-| `verification/` | `decomposition_results.csv` (truth vs lsq vs ridge), `decomposition_summary_lsq.png`, `decomposition_summary_ridge.png` |
+| `1_samples/` | `points_13.json` (copy), `target_file.csv` (id + P1..P13), `ground_truth.csv` (id + scenario + a1..a9), `wafer_maps.png`, `measurement_plot.png` |
+| `2_decomposition/` | `decomposed_target.csv` (id + a1..a9) |
+| `3_verification/` | `decomposition_results.csv` (truth vs lsq vs ridge), `decomposition_summary_lsq.png`, `decomposition_summary_ridge.png` |
 
 ---
 
@@ -99,7 +100,7 @@ The easiest path is the bundled PowerShell runner. From inside `examples/`:
 .\run_demo.ps1
 ```
 
-This runs Stage 1 → 2 → 3 sequentially with the correct flags. Outputs land in `examples/samples/`, `examples/decomposition/`, and `examples/verification/`.
+This runs Stage 1 → 2 → 3 sequentially with the correct flags. Outputs land in `examples/1_samples/`, `examples/2_decomposition/`, and `examples/3_verification/`.
 
 To call each stage manually (run from inside `examples/`):
 
@@ -109,27 +110,27 @@ cd examples
 # Stage 1: generate synthetic measurement data
 python generate_samples.py `
     --working_folder . `
-    --config_json config.json `
-    --wafer_points points_13.json `
-    --output_folder ./samples
+    --config_json ./configuration/config.json `
+    --wafer_points ./configuration/points_13.json `
+    --output_folder ./1_samples
 
 # Stage 2: Zernike fitting -> recover N coefficients (LSQ or Ridge)
 python -m wlzpoly.decompose `
     --working_folder . `
-    --wafer_points ./samples/points_13.json `
-    --target_file ./samples/target_file.csv `
+    --wafer_points ./1_samples/points_13.json `
+    --target_file ./1_samples/target_file.csv `
     --n_terms 9 `
-    --output_folder ./decomposition `
+    --output_folder ./2_decomposition `
     --solver lsq
 
 # Stage 3: compare against ground truth + visualize (LSQ + Ridge)
 python -m wlzpoly.verify `
     --working_folder . `
-    --wafer_points ./samples/points_13.json `
-    --target_file ./samples/target_file.csv `
-    --ground_truth_file ./samples/ground_truth.csv `
+    --wafer_points ./1_samples/points_13.json `
+    --target_file ./1_samples/target_file.csv `
+    --ground_truth_file ./1_samples/ground_truth.csv `
     --n_terms 9 `
-    --output_folder ./verification `
+    --output_folder ./3_verification `
     --solver lsq ridge
 ```
 
@@ -148,10 +149,11 @@ from wlzpoly import (
 ## Data flow
 
 ```
-                      ┌──────────────────┐
-                      │ config.json      │  Stage 1 only
-                      │ points_13.json   │  measurement layout
-                      └────────┬─────────┘
+                  ┌────────────────────────┐
+                  │  configuration/        │  Stage 1 only
+                  │   config.json          │  settings
+                  │   points_13.json       │  measurement layout
+                  └────────────┬───────────┘
                                │
                                ▼
                   ┌────────────────────────┐
@@ -159,14 +161,14 @@ from wlzpoly import (
                   └────────────┬───────────┘
                                │
                                ▼
-                       ┌─────────────┐
-                       │  samples/   │  target_file.csv +
-                       │             │  ground_truth.csv +
-                       │             │  points_13.json
-                       └──────┬──────┘
-                              │  (target_file, wafer_points,
-                              │   ground_truth via CLI flags)
-              ┌───────────────┴────────────────┐
+                  ┌────────────────────────┐
+                  │  1_samples/            │  target_file.csv +
+                  │                        │  ground_truth.csv +
+                  │                        │  points_13.json (copy)
+                  └────────────┬───────────┘
+                               │  (target_file, wafer_points,
+                               │   ground_truth via CLI flags)
+              ┌────────────────┴───────────────┐
               │                                │
               ▼                                ▼
     ┌──────────────────┐             ┌─────────────────┐
@@ -177,9 +179,9 @@ from wlzpoly import (
     └─────────┬────────┘             └────────┬────────┘
               │                                │
               ▼                                ▼
-      ┌──────────────┐               ┌──────────────────┐
-      │decomposition/│               │  verification/   │
-      └──────────────┘               └──────────────────┘
+    ┌──────────────────┐             ┌──────────────────┐
+    │ 2_decomposition/ │             │ 3_verification/  │
+    └──────────────────┘             └──────────────────┘
 ```
 
 ---
@@ -217,7 +219,7 @@ from wlzpoly import WaferLevelZernikePolynomials
 coords_df = load_wafer_coordinates(
     wafer_points_file="points_13.json", coordinate="cartesian",
 )
-df_measured = load_measured_data(target_file="samples/target_file.csv")
+df_measured = load_measured_data(target_file="1_samples/target_file.csv")
 
 wlz = WaferLevelZernikePolynomials(
     coords_df=coords_df,
@@ -297,9 +299,9 @@ Each cell shows the Noll index j, (n, m), and (when supplied) the optical name. 
 
 Generates synthetic wafer data.
 
-**Inputs**: `config.json`, `points_13.json`
+**Inputs (`configuration/`)**: `config.json`, `points_13.json`
 
-**Outputs (`samples/`)**:
+**Outputs (`1_samples/`)**:
 - `points_13.json` — copy of the input (consumed by later stages)
 - `target_file.csv` — id + P1..P13 (same shape as real metrology output)
 - `ground_truth.csv` — id + scenario + a1..a9 (verification answer key)
@@ -327,10 +329,10 @@ General-purpose linear-regression solvers (no Zernike dependency).
 
 Recovers 9 Zernike coefficients from the 13-point measurements (LSQ fitting).
 
-**Inputs (`samples/`)**: `points_13.json`, `target_file.csv`
+**Inputs (`1_samples/`)**: `points_13.json`, `target_file.csv`
 
-**Outputs (`decomposition/`)**:
-- `decomposed_samples.csv` — id + a1..a9 (production-shaped output)
+**Outputs (`2_decomposition/`)**:
+- `decomposed_target.csv` — id + a1..a9 (production-shaped output)
 
 **Provided functions** (also imported by `verify.py`):
 - `load_wafer_coordinates(*, wafer_points_file, coordinate)` →
@@ -357,9 +359,9 @@ Recovers 9 Zernike coefficients from the 13-point measurements (LSQ fitting).
 
 Compares LSQ and Ridge fitting results against the ground truth.
 
-**Inputs (`samples/`)**: `points_13.json`, `target_file.csv`, `ground_truth.csv`
+**Inputs (`1_samples/`)**: `points_13.json`, `target_file.csv`, `ground_truth.csv`
 
-**Outputs (`verification/`)**:
+**Outputs (`3_verification/`)**:
 - `decomposition_results.csv` — id + scenario + truth/lsq/ridge × 9 = 27 columns + 2 metadata
 - `decomposition_summary_lsq.png` — truth vs LSQ bar chart
 - `decomposition_summary_ridge.png` — truth vs Ridge bar chart
@@ -551,7 +553,7 @@ W_02,tilted,498.0,8.0,-1.5,...,0.0
 
 Per-wafer ground-truth Zernike coefficients (used only for verification).
 
-### `decomposed_samples.csv` (Stage 2 output)
+### `decomposed_target.csv` (Stage 2 output)
 
 ```
 id,a1,a2,a3,...,a9
@@ -628,19 +630,21 @@ Edit `run_demo.ps1` Stage 1 line — change `--noise_sigma 5.0` to the desired v
 
 ```bash
 # Low noise (LSQ recovers near-perfectly)
-python generate_samples.py --working_folder . --config_json config.json \
-    --wafer_points points_13.json --output_folder ./samples --noise_sigma 0.4
+python generate_samples.py --working_folder . \
+    --config_json ./configuration/config.json \
+    --wafer_points ./configuration/points_13.json \
+    --output_folder ./1_samples --noise_sigma 0.4
 
 python -m wlzpoly.decompose --working_folder . \
-    --wafer_points ./samples/points_13.json \
-    --target_file ./samples/target_file.csv \
-    --output_folder ./decomposition --n_terms 9 --solver lsq
+    --wafer_points ./1_samples/points_13.json \
+    --target_file ./1_samples/target_file.csv \
+    --output_folder ./2_decomposition --n_terms 9 --solver lsq
 
 python -m wlzpoly.verify --working_folder . \
-    --wafer_points ./samples/points_13.json \
-    --target_file ./samples/target_file.csv \
-    --ground_truth_file ./samples/ground_truth.csv \
-    --output_folder ./verification --n_terms 9 --solver lsq ridge
+    --wafer_points ./1_samples/points_13.json \
+    --target_file ./1_samples/target_file.csv \
+    --ground_truth_file ./1_samples/ground_truth.csv \
+    --output_folder ./3_verification --n_terms 9 --solver lsq ridge
 ```
 
 ### Add a new scenario

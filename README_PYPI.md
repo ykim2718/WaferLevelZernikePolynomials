@@ -86,7 +86,7 @@ python -m wlzpoly.verify --target_file ...       # Stage 3: compare vs ground tr
                        --ground_truth_file ...
 ```
 
-Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--target_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{samples,decomposition,verification}/`; pre-generated copies are visible on the GitHub repo.
+Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--target_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
 
 ## Documentation
 

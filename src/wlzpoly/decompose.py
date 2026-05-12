@@ -14,7 +14,7 @@ Inputs (under ./samples/, from generate_samples.py)
 
 Outputs (under ./decomposition/)
 --------------------------------
-    decomposed_samples.csv          (id + a1..aN, fitted)
+    decomposed_target.csv           (id + a1..aN, fitted)
 ============================================================
 """
 
@@ -196,7 +196,7 @@ def decompose(
     ----------
     wafer_points_file : Path to the wafer-points JSON
     target_file : Path to the measurement CSV (id + P1..PN)
-    out_folder : where to write decomposed_samples.csv
+    out_folder : where to write decomposed_target.csv
     solver : "lsq" or "ridge"
     lam : Ridge regularization strength (used if solver="ridge")
     n_terms : number of Zernike terms
@@ -269,7 +269,7 @@ def decompose(
     )
 
     # ---- File I/O: write coefficients ----
-    path = out_folder / "decomposed_samples.csv"
+    path = out_folder / "decomposed_target.csv"
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(

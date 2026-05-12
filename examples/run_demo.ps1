@@ -25,20 +25,20 @@ Set-Location $PSScriptRoot
 # Stage 1: synthesize wafers      -> examples/samples/
 python generate_samples.py `
     --working_folder . `
-    --config_json config.json `
-    --wafer_points points_13.json `
+    --config_json ./configuration/config.json `
+    --wafer_points ./configuration/points_13.json `
     --noise_sigma 5.0 `
     --seed 42 `
     --n_drift 30 `
-    --output_folder ./samples
+    --output_folder ./1_samples
 
 # Stage 2: fit coefficients       -> examples/decomposition/
 python -m wlzpoly.decompose `
     --working_folder . `
-    --wafer_points ./samples/points_13.json `
-    --target_file ./samples/target_file.csv `
+    --wafer_points ./1_samples/points_13.json `
+    --target_file ./1_samples/target_file.csv `
     --n_terms 9 `
-    --output_folder ./decomposition `
+    --output_folder ./2_decomposition `
     --solver lsq `
     --lam 0.01 `
     --coordinate cartesian
@@ -46,10 +46,10 @@ python -m wlzpoly.decompose `
 # Stage 3: compare vs truth       -> examples/verification/
 python -m wlzpoly.verify `
     --working_folder . `
-    --wafer_points ./samples/points_13.json `
-    --target_file ./samples/target_file.csv `
-    --ground_truth_file ./samples/ground_truth.csv `
+    --wafer_points ./1_samples/points_13.json `
+    --target_file ./1_samples/target_file.csv `
+    --ground_truth_file ./1_samples/ground_truth.csv `
     --n_terms 9 `
-    --output_folder ./verification `
+    --output_folder ./3_verification `
     --solver lsq ridge `
     --coordinate cartesian
