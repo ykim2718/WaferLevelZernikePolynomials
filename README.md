@@ -274,7 +274,7 @@ Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options
                                │
                                ▼
                   ┌────────────────────────┐
-                  │ generate_samples.py    │  ① data generation
+                  │ generate_samples.py    │  Stage 1
                   └────────────┬───────────┘
                                │
                                ▼
@@ -288,10 +288,9 @@ Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options
               │                            │
               ▼                            ▼
     ┌──────────────────┐         ┌──────────────────┐
-    │ decompose.py     │         │ decompose.py     │
-    │  ②a --solver lsq │         │  ②b --solver     │
-    │                  │         │      ridge       │
-    │                  │         │      --auto_lam  │
+    │ decompose.py     │ Stage 2 │ decompose.py     │ Stage 2
+    │  --solver lsq    │         │  --solver ridge  │
+    │                  │         │   --auto_lam     │
     └────────┬─────────┘         └────────┬─────────┘
              │                            │
              ▼                            ▼
@@ -303,7 +302,7 @@ Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options
                           │  + ground_truth.csv (from 1_samples)
                           ▼
                 ┌──────────────────┐
-                │   verify.py      │  ③ compare + viz
+                │   verify.py      │  Stage 3
                 │   (no fitting)   │
                 └────────┬─────────┘
                          │
