@@ -91,6 +91,7 @@ WaferLevelZernikePolynomials/
 └── examples/                  ← demo (NOT installed via pip)
     ├── generate_samples.py    ← Stage 1: synthetic data generation
     ├── run_demo.ps1           ← runs all three stages end-to-end
+    ├── generate_pyramid_image.py  ← (optional) Zernike basis-function reference chart
     ├── configuration/         ← inputs (settings + measurement layout)
     │   ├── config.json        ← generate_samples settings (scenarios, drift)
     │   └── points_13.json     ← 13-point measurement coordinates
@@ -249,6 +250,16 @@ Compares Stage 2's precomputed coefficients against ground truth. **No fitting h
 5. Render scenario-level bar charts as PNG
 
 At least one of the two decomposed files must exist. If only one is given, that solver's chart is the only one produced.
+
+### Optional — Zernike pyramid reference chart
+
+`generate_pyramid_image.py` renders the canonical Noll pyramid (basis functions themselves, not any wafer data). Independent of the three-stage demo. Run it when you need a fresh reference image for docs or slides.
+
+```bash
+python generate_pyramid_image.py --with_names
+```
+
+Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options: `--n_max` (default 4 → 15 terms), `--with_names` (Piston/Tilt X/... labels), `--output_folder`, `--output_file`, `--cmap`. See `-h` for the full list.
 
 ---
 
