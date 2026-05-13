@@ -267,9 +267,9 @@ Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options
 
 ```
                   ┌────────────────────────┐
-                  │  configuration/        │  Stage 1 only
-                  │   config.json          │  settings
-                  │   points_13.json       │  measurement layout
+                  │  configuration/        │
+                  │   config.json          │
+                  │   points_13.json       │
                   └────────────┬───────────┘
                                │
                                ▼
@@ -786,7 +786,31 @@ T = A · a + ε     (T: 13×1, A: 13×9, a: 9×1)
 | **LSQ** | â = (AᵀA)⁻¹ Aᵀ T | Unbiased, higher variance |
 | **Ridge** | â = (AᵀA + λI)⁻¹ Aᵀ T | Biased toward zero, lower variance |
 
-For Ridge, λ can be fixed via `--lam` or chosen automatically with `--auto_lam` (see next section).
+The hat on **â** is the standard statistics convention for *estimate of the unknown true value* — here, the estimate of the true coefficient vector `a` recovered from the measurements.
+
+The CLI flag `--lam` directly supplies λ in the Ridge formula (i.e. **`--lam` = λ**). For Ridge, λ can be fixed via `--lam` or chosen automatically with `--auto_lam` (see next section).
+
+**LSQ derivation** — minimize the residual sum of squares:
+
+```
+J(a) = ‖T − A·a‖²  =  (T − A·a)ᵀ (T − A·a)
+
+∂J/∂a = −2 Aᵀ (T − A·a) = 0
+      ⇒  Aᵀ A · a = Aᵀ T
+      ⇒  â = (Aᵀ A)⁻¹ Aᵀ T
+```
+
+**Ridge derivation** — same loss as LSQ plus a coefficient-size penalty:
+
+```
+J(a) = ‖T − A·a‖² + λ ‖a‖²
+
+∂J/∂a = −2 Aᵀ (T − A·a) + 2 λ a = 0
+      ⇒  (Aᵀ A + λI) · a = Aᵀ T
+      ⇒  â = (Aᵀ A + λI)⁻¹ Aᵀ T
+```
+
+The only structural difference is the `λI` added on the diagonal of `AᵀA`, which (a) makes the matrix invertible even when `AᵀA` is rank-deficient, and (b) shrinks the coefficients toward zero (bias) in exchange for lower variance.
 
 ### LOOCV-based λ selection
 
