@@ -1,0 +1,113 @@
+{
+  "wafer_size_mm": 300,
+  "edge_exclusion_mm": 5,
+  "wafer_radius_mm": 145,
+  "pattern": "13-point cardinal-aligned",
+  "description": "13-point thickness measurement layout on a 300 mm wafer. Center 1 + Middle ring (r=75 mm, 4 cardinal) + Edge ring (r=145 mm, 8 directions).",
+  "points": [
+    {
+      "id": "P1",
+      "x": 0.0,
+      "y": 0.0,
+      "r": 0,
+      "theta": 0,
+      "zone": "Center"
+    },
+    {
+      "id": "P2",
+      "x": 75.0,
+      "y": 0.0,
+      "r": 75,
+      "theta": 0,
+      "zone": "Mid_E"
+    },
+    {
+      "id": "P3",
+      "x": 0.0,
+      "y": 75.0,
+      "r": 75,
+      "theta": 90,
+      "zone": "Mid_N"
+    },
+    {
+      "id": "P4",
+      "x": -75.0,
+      "y": 0.0,
+      "r": 75,
+      "theta": 180,
+      "zone": "Mid_W"
+    },
+    {
+      "id": "P5",
+      "x": 0.0,
+      "y": -75.0,
+      "r": 75,
+      "theta": 270,
+      "zone": "Mid_S"
+    },
+    {
+      "id": "P6",
+      "x": 145.0,
+      "y": 0.0,
+      "r": 145,
+      "theta": 0,
+      "zone": "Edge_E"
+    },
+    {
+      "id": "P7",
+      "x": 102.5,
+      "y": 102.5,
+      "r": 145,
+      "theta": 45,
+      "zone": "Edge_NE"
+    },
+    {
+      "id": "P8",
+      "x": 0.0,
+      "y": 145.0,
+      "r": 145,
+      "theta": 90,
+      "zone": "Edge_N"
+    },
+    {
+      "id": "P9",
+      "x": -102.5,
+      "y": 102.5,
+      "r": 145,
+      "theta": 135,
+      "zone": "Edge_NW"
+    },
+    {
+      "id": "P10",
+      "x": -145.0,
+      "y": 0.0,
+      "r": 145,
+      "theta": 180,
+      "zone": "Edge_W"
+    },
+    {
+      "id": "P11",
+      "x": -102.5,
+      "y": -102.5,
+      "r": 145,
+      "theta": 225,
+      "zone": "Edge_SW"
+    },
+    {
+      "id": "P12",
+      "x": 0.0,
+      "y": -145.0,
+      "r": 145,
+      "theta": 270,
+      "zone": "Edge_S"
+    },
+    {
+      "id": "P13",
+      "x": 102.5,
+      "y": -102.5,
+      "r": 145,
+      "theta": 315,
+      "zone": "Edge_SE"
+    }
+  ]
+}

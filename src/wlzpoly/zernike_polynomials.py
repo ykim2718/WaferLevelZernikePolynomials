@@ -444,8 +444,8 @@ class ZernikePolynomials:
         # the bottom-most row, so figure width = (n_max+1)*cell_size.
         # Vertical: small gap above each row for title text.
         n_rows = n_max + 1
-        title_gap_inches = cell_size * 0.18
-        suptitle_inches = 0.45
+        title_gap_inches = cell_size * 0.09
+        suptitle_inches = 0.71
 
         fig_w = cell_size * n_rows
         fig_h = (
