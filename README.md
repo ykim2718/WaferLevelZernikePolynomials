@@ -480,6 +480,11 @@ python -m wlzpoly.decompose [options]
 | `--loocv_lambdas` | `[0.0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]` | Candidate λ values for LOOCV (when `--auto_lam`) |
 | `--loocv_ref` | `first_wafer` | LOOCV reference T: `first_wafer` / `mean` / `per_wafer` |
 | `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
+| `--col_wafer_id` | `"wafer_id"` | Name of the wafer-id column in `--input_file` (also used as id column in output CSV) |
+| `--col_points` | `P1 P2 … P13` | Measurement-point column names in `--input_file`; must match point ids in `--wafer_points` |
+| `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in the output CSV (`<prefix>1..<prefix>n_terms`) |
+
+`--input_file` 의 컬럼이 `--col_wafer_id` / `--col_points` 와 일치하지 않거나 `--wafer_points` JSON 의 point id 와 매치되지 않으면 `parse_args()` 단계에서 `parser.error` 로 즉시 종료 (main 진입 전 검증).
 
 ### `verify.py`
 

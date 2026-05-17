@@ -90,7 +90,7 @@ python -m wlzpoly.verify ...                     # Stage 3: read both CSVs + gro
                                                  #   compare, plot (no fitting)
 ```
 
-Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--input_file`, `--output_file`, `--auto_lam`, `--decomposed_lsq_file`, `--decomposed_ridge_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
+Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--input_file`, `--output_file`, `--auto_lam`, `--col_wafer_id`, `--col_points`, `--coeff_prefix`, `--decomposed_lsq_file`, `--decomposed_ridge_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
 
 ## Documentation
 

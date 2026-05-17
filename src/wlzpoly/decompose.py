@@ -41,6 +41,9 @@ INPUT_FILE_DEFAULT = "target_file.csv"
 OUTPUT_FILE_DEFAULT = "decomposed_targets.csv"
 N_TERMS_DEFAULT = 9
 OUT_FOLDER_DEFAULT = Path.cwd() / "decomposition"
+COL_WAFER_ID_DEFAULT = "wafer_id"
+COL_POINTS_DEFAULT = [f"P{i}" for i in range(1, 14)]
+COEFF_PREFIX_DEFAULT = "a"
 
 # LOOCV (used when --solver ridge --auto_lam).
 LOOCV_LAMBDAS_DEFAULT = [0.0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
@@ -149,6 +152,8 @@ def load_wafer_coordinates(
 def load_measured_data(
     *,
     target_file: Union[str, Path],
+    col_wafer_id: str = COL_WAFER_ID_DEFAULT,
+    col_points: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Read the measurement CSV into a long-format DataFrame (T only).
 
@@ -159,8 +164,15 @@ def load_measured_data(
     Parameters
     ----------
     target_file : Path
-        Path to the CSV with `id, P1, P2, ...` columns (commonly
-        samples.csv or target.csv).
+        Path to the CSV with the wafer-id column plus per-point
+        measurement columns.
+    col_wafer_id : str
+        Name of the wafer-id column in `target_file`. Renamed
+        internally to canonical 'wafer_id' on the returned index.
+    col_points : list of str, optional
+        Measurement-point column names to unpivot. Defaults to
+        ``COL_POINTS_DEFAULT`` (``P1..P13``). Must match the
+        ``point_id`` values in the wafer-points JSON.
 
     Returns
     -------
@@ -172,12 +184,31 @@ def load_measured_data(
         f"target_file must be str/Path, got "
         f"{type(target_file).__name__}"
     )
+    assert isinstance(col_wafer_id, str), (
+        f"col_wafer_id must be str, got "
+        f"{type(col_wafer_id).__name__}"
+    )
+    if col_points is None:
+        col_points = list(COL_POINTS_DEFAULT)
+    assert isinstance(col_points, list), (
+        f"col_points must be list, got {type(col_points).__name__}"
+    )
 
     samples_df = pd.read_csv(Path(target_file))
+    # Canonicalize the id column name to 'wafer_id' so downstream
+    # MultiIndex level names stay stable regardless of the user's
+    # input column naming.
+    if col_wafer_id != "wafer_id":
+        samples_df = samples_df.rename(
+            columns={col_wafer_id: "wafer_id"})
     long_df = (
         samples_df
-        .melt(id_vars="id", var_name="point_id", value_name="T")
-        .rename(columns={"id": "wafer_id"})
+        .melt(
+            id_vars="wafer_id",
+            value_vars=col_points,
+            var_name="point_id",
+            value_name="T",
+        )
         .set_index(["wafer_id", "point_id"])
         .sort_index()
     )
@@ -286,6 +317,9 @@ def decompose(
     loocv_ref: str = LOOCV_REF_DEFAULT,
     n_terms: int = 9,
     coordinate: CoordinateLiteral = "cartesian",
+    col_wafer_id: str = COL_WAFER_ID_DEFAULT,
+    col_points: Optional[List[str]] = None,
+    coeff_prefix: str = COEFF_PREFIX_DEFAULT,
 ) -> List[Dict[str, Any]]:
     """Pure fitting stage: N-point measurements -> N coefficients.
 
@@ -318,6 +352,8 @@ def decompose(
     """
     if loocv_lambdas is None:
         loocv_lambdas = list(LOOCV_LAMBDAS_DEFAULT)
+    if col_points is None:
+        col_points = list(COL_POINTS_DEFAULT)
 
     assert isinstance(wafer_points_file, (str, Path)), (
         f"wafer_points_file must be str/Path, got "
@@ -363,6 +399,17 @@ def decompose(
         f"coordinate must be one of {COORDINATE_CHOICES}, "
         f"got {coordinate!r}"
     )
+    assert isinstance(col_wafer_id, str), (
+        f"col_wafer_id must be str, got "
+        f"{type(col_wafer_id).__name__}"
+    )
+    assert isinstance(col_points, list), (
+        f"col_points must be list, got {type(col_points).__name__}"
+    )
+    assert isinstance(coeff_prefix, str), (
+        f"coeff_prefix must be str, got "
+        f"{type(coeff_prefix).__name__}"
+    )
 
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
@@ -371,7 +418,11 @@ def decompose(
     coords_df = load_wafer_coordinates(
         wafer_points_file=wafer_points_file, coordinate=coordinate,
     )
-    mesured_df = load_measured_data(target_file=input_file)
+    mesured_df = load_measured_data(
+        target_file=input_file,
+        col_wafer_id=col_wafer_id,
+        col_points=col_points,
+    )
 
     print("=" * 70)
     print(f"[decompose] solver = {solver}, n_terms = {n_terms}")
@@ -415,7 +466,8 @@ def decompose(
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(
-            ["id"] + [f"a{j}" for j in range(1, n_terms + 1)]
+            [col_wafer_id]
+            + [f"{coeff_prefix}{j}" for j in range(1, n_terms + 1)]
         )
         for r in fit_results:
             w.writerow(
@@ -521,7 +573,72 @@ def parse_args() -> argparse.Namespace:
             "(rho, theta) grid (default: cartesian)"
         ),
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--col_wafer_id", type=str, default=COL_WAFER_ID_DEFAULT,
+        help='Name of the wafer-id column in --input_file. Also '
+             'used as the id column name in the output CSV. '
+             f'(default: "{COL_WAFER_ID_DEFAULT}")',
+    )
+    parser.add_argument(
+        "--col_points", type=str, nargs="+",
+        default=list(COL_POINTS_DEFAULT),
+        help='Measurement-point column names in --input_file. Must '
+             'match the point ids in --wafer_points. '
+             f'(default: {COL_POINTS_DEFAULT})',
+    )
+    parser.add_argument(
+        "--coeff_prefix", type=str, default=COEFF_PREFIX_DEFAULT,
+        help='Prefix for the coefficient columns in the output CSV '
+             '(columns become <prefix>1..<prefix>n_terms). '
+             f'(default: "{COEFF_PREFIX_DEFAULT}")',
+    )
+    args = parser.parse_args()
+
+    # --- Validation: column presence in --input_file ---
+    input_path = Path(args.input_file)
+    if not input_path.is_absolute():
+        input_path = Path.cwd() / input_path
+    if not input_path.exists():
+        parser.error(
+            f"--input_file not found: {input_path}")
+    try:
+        csv_cols = pd.read_csv(
+            input_path, nrows=0).columns.tolist()
+    except Exception as exc:
+        parser.error(
+            f"--input_file is not a readable CSV "
+            f"({input_path}): {exc}")
+    if args.col_wafer_id not in csv_cols:
+        parser.error(
+            f"--col_wafer_id {args.col_wafer_id!r} not found in "
+            f"--input_file columns {csv_cols} ({input_path})")
+    missing_pts = [c for c in args.col_points if c not in csv_cols]
+    if missing_pts:
+        parser.error(
+            f"--col_points {missing_pts} not found in "
+            f"--input_file columns {csv_cols} ({input_path})")
+
+    # --- Validation: point ids present in --wafer_points JSON ---
+    wpts_path = _resolve_under(args.wafer_points, args.working_folder)
+    if not wpts_path.exists():
+        parser.error(
+            f"--wafer_points not found: {wpts_path}")
+    try:
+        with wpts_path.open() as f:
+            wpts_def = json.load(f)
+    except Exception as exc:
+        parser.error(
+            f"--wafer_points is not valid JSON "
+            f"({wpts_path}): {exc}")
+    json_pt_ids = [p.get("id") for p in wpts_def.get("points", [])]
+    missing_json = [c for c in args.col_points
+                    if c not in json_pt_ids]
+    if missing_json:
+        parser.error(
+            f"--col_points {missing_json} not found in "
+            f"--wafer_points point ids {json_pt_ids} ({wpts_path})")
+
+    return args
 
 
 if __name__ == "__main__":
@@ -551,6 +668,9 @@ if __name__ == "__main__":
         else:
             print(f"  lam            : {args.lam}")
     print(f"  Coordinate     : {args.coordinate}")
+    print(f"  col_wafer_id   : {args.col_wafer_id}")
+    print(f"  col_points     : {args.col_points}")
+    print(f"  coeff_prefix   : {args.coeff_prefix}")
     print()
 
     decompose(
@@ -565,6 +685,9 @@ if __name__ == "__main__":
         loocv_ref=args.loocv_ref,
         n_terms=args.n_terms,
         coordinate=args.coordinate,
+        col_wafer_id=args.col_wafer_id,
+        col_points=args.col_points,
+        coeff_prefix=args.coeff_prefix,
     )
 
 
