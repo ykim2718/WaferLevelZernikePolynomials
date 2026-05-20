@@ -504,7 +504,7 @@ python -m wlzpoly.decompose [options]
 | `--col_points` | `P1 P2 … P13` | Measurement-point column names in `--input_file`; must match point ids in `--wafer_points` |
 | `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in the output CSV (`<prefix>1..<prefix>n_terms`) |
 
-`--input_file` 의 컬럼이 `--col_wafer_id` / `--col_points` 와 일치하지 않거나 `--wafer_points` JSON 의 point id 와 매치되지 않으면 `parse_args()` 단계에서 `parser.error` 로 즉시 종료 (main 진입 전 검증).
+If the columns of `--input_file` do not match `--col_wafer_id` / `--col_points`, or the point ids in the `--wafer_points` JSON do not match `--col_points`, `parse_args()` aborts immediately with `parser.error` before main runs.
 
 ### `verify.py`
 
@@ -540,7 +540,7 @@ python -m wlzpoly.reconstruct [options]
 | `--col_points` | `P1 P2 … P13` | Output measurement-point column names; subset/permutation of `--wafer_points` point ids |
 | `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in `--input_file` |
 
-`--input_file` 의 컬럼 / `--wafer_points` JSON 의 point id 가 `--col_wafer_id` / `--coeff_prefix` / `--col_points` 와 매치 안 되면 `parse_args()` 단계에서 `parser.error` 로 종료.
+If the columns of `--input_file` or the point ids in the `--wafer_points` JSON do not match `--col_wafer_id` / `--coeff_prefix` / `--col_points`, `parse_args()` aborts with `parser.error`.
 
 ### Note on the coordinate option
 
@@ -848,6 +848,58 @@ where:
 | `ε` | 13×1 | per-point measurement noise (residual not captured by the first 9 basis functions) |
 | `13` | — | number of measurement points (= rows of `A` and `T`); set by `--wafer_points` JSON |
 | `9` | — | number of Zernike terms (= columns of `A` = rows of `a`); set by `--n_terms` (default 9) |
+
+### Zernike reconstruction
+
+Reconstruction is the **inverse of decomposition**: given an already-known Zernike coefficient vector `a`, regenerate the N-point measurement profile it describes. This is what [`wlzpoly.reconstruct`](#reconstructpy-optional-inverse-of-decompose) (Stage 4, optional) does.
+
+```
+T_recon = A · a            (no ε; reconstructed signal is noise-free by construction)
+```
+
+where:
+
+| Symbol | Shape | Meaning |
+|---|---|---|
+| `T_recon` | 13×1 | reconstructed thickness vector at the same N measurement points |
+| `A` | 13×9 | same basis matrix as in decomposition (`A[i, k] = Z_k(ρ_i, θ_i)`) |
+| `a` | 9×1 | fitted (or otherwise known) Zernike coefficient vector |
+
+Per measurement point i, the reconstructed thickness is the inner product of basis row i with the coefficient vector:
+
+```
+T_recon[i] = a_1 · Z_1(ρ_i, θ_i)
+           + a_2 · Z_2(ρ_i, θ_i)
+           + ...
+           + a_N · Z_N(ρ_i, θ_i)
+           = Σ_k  A[i, k] · a_k
+```
+
+Stacking all 13 rows gives `T_recon = A · a`. For many wafers at once, the implementation runs one matrix multiply `T_matrix = a_matrix @ A.T` so the output shape is `(n_wafers, n_points)`.
+
+**Tiny worked example** (illustrative A values, not the real Zernike values; n_terms=3, n_points=4):
+
+```
+a = [500.0, 2.0, 0.5]       # piston, tilt-x, defocus
+A = [[1.0,  0.0, -1.0],     # row per measurement point
+     [1.0,  1.0,  0.0],
+     [1.0,  0.0,  1.0],
+     [1.0, -1.0,  0.0]]
+T_recon = A · a
+        = [1.0·500 + 0.0·2 + (-1.0)·0.5,    # = 499.5
+           1.0·500 + 1.0·2 +  0.0·0.5,      # = 502.0
+           1.0·500 + 0.0·2 +  1.0·0.5,      # = 500.5
+           1.0·500 + (-1.0)·2 + 0.0·0.5]    # = 498.0
+```
+
+**Comparison with decomposition**:
+
+| Direction | Knowns | Unknown | Cost |
+|---|---|---|---|
+| Decompose (Stage 2) | T (measured) + A (geometry) | a — recover via LSQ / Ridge | inversion / regularization per wafer |
+| Reconstruct (`wlzpoly.reconstruct`) | a (fitted) + A (geometry) | T_recon — compute directly | one matrix multiply (no fitting) |
+
+Reconstruction never recovers the original noise ε; the residual `T − T_recon` is the part the first N Zernike terms could not absorb.
 
 ### Fitting
 
