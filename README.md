@@ -270,9 +270,9 @@ Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options
 
 ```bash
 python -m wlzpoly.reconstruct `
-    --working_folder . `
-    --wafer_points ./1_samples/points_13.json `
-    --input_file ./2_decomposition/decomposed_targets_lsq.csv `
+    --input_folder . `
+    --wafer_point_json ./1_samples/points_13.json `
+    --decomposed_file ./2_decomposition/decomposed_targets_lsq.csv `
     --output_folder ./4_reconstruction `
     --output_file reconstructed_lsq.csv `
     --n_terms 9 `
@@ -527,20 +527,29 @@ python -m wlzpoly.verify [options]
 python -m wlzpoly.reconstruct [options]
 ```
 
+CLI options are split into two argparse groups (`Input` / `Output`); `-h` displays them under those headings.
+
+**Input**
+
 | Option | Default | Description |
 |---|---|---|
-| `--working_folder` | `Path.cwd()` | Base folder for resolving `--wafer_points` |
-| `--wafer_points` | `"wafer_points.json"` | Wafer-points JSON (resolved under `--working_folder` if relative) |
-| `--input_file` | `"decomposed_targets.csv"` | Decomposed-coefficients CSV (id + `<prefix>1..<prefix>N`) |
-| `--n_terms` | 9 | Number of Zernike terms to read from `--input_file` |
+| `--input_folder` | `Path.cwd()` | Base folder for resolving `--wafer_point_json` |
+| `--wafer_point_json` | `"wafer_points.json"` | Wafer-points JSON (must have `.json` extension; resolved under `--input_folder` if relative) |
+| `--decomposed_file` | `"decomposed_targets.csv"` | Decomposed-coefficients CSV (id + `<prefix>1..<prefix>N`) |
+| `--n_terms` | 9 | Number of Zernike terms to read from `--decomposed_file`. Must equal the count of `<prefix>\d+` columns in the CSV |
+| `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
+| `--col_wafer_id` | `"wafer_id"` | Name of the wafer-id column in `--decomposed_file` (also used as id column in output CSV) |
+| `--col_points` | `P1 P2 … P13` | Output measurement-point column names; subset/permutation of `--wafer_point_json` point ids |
+| `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in `--decomposed_file` |
+
+**Output**
+
+| Option | Default | Description |
+|---|---|---|
 | `--output_folder` | `Path.cwd() / "reconstruction"` | Output folder (CSV is written by the CLI; `reconstruct()` API only returns the DataFrame) |
 | `--output_file` | `"reconstructed_targets.csv"` | Filename for the reconstructed-measurements CSV |
-| `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
-| `--col_wafer_id` | `"wafer_id"` | Name of the wafer-id column in `--input_file` (also used as id column in output CSV) |
-| `--col_points` | `P1 P2 … P13` | Output measurement-point column names; subset/permutation of `--wafer_points` point ids |
-| `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in `--input_file` |
 
-If the columns of `--input_file` or the point ids in the `--wafer_points` JSON do not match `--col_wafer_id` / `--coeff_prefix` / `--col_points`, `parse_args()` aborts with `parser.error`.
+`parse_args()` aborts with `parser.error` if any of the following are violated: `--wafer_point_json` does not end in `.json`; `--decomposed_file` or `--wafer_point_json` does not exist; `--decomposed_file` is missing the required `--col_wafer_id` / `<coeff_prefix>1..<coeff_prefix>N` columns; the number of `<coeff_prefix>\d+` columns in `--decomposed_file` does not equal `--n_terms`; any of `--col_points` is not present in the `--wafer_point_json` point ids.
 
 ### Note on the coordinate option
 
