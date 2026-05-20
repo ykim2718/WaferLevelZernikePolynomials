@@ -86,7 +86,8 @@ WaferLevelZernikePolynomials/
 │       ├── zernike_polynomials.py  ← Zernike classes (math)
 │       ├── regression.py      ← LSQ / Ridge / LOOCV solvers
 │       ├── decompose.py       ← Stage 2: fitting (recover Zernike coefficients)
-│       └── verify.py          ← Stage 3: verification + visualization
+│       ├── verify.py          ← Stage 3: verification + visualization
+│       └── reconstruct.py     ← (optional) inverse of decompose: T = A·a
 │
 └── examples/                  ← demo (NOT installed via pip)
     ├── generate_samples.py    ← Stage 1: synthetic data generation
@@ -97,7 +98,8 @@ WaferLevelZernikePolynomials/
     │   └── points_13.json     ← 13-point measurement coordinates
     ├── 1_samples/             ← Stage 1 outputs (committed for browsing)
     ├── 2_decomposition/       ← Stage 2 outputs
-    └── 3_verification/        ← Stage 3 outputs
+    ├── 3_verification/        ← Stage 3 outputs
+    └── 4_reconstruction/      ← (optional) wlzpoly.reconstruct outputs
 ```
 
 Pre-generated demo outputs are kept under `examples/{1_samples, 2_decomposition, 3_verification}/` so the figures and CSVs can be browsed directly on the GitHub page. They are excluded from the PyPI sdist via `MANIFEST.in` to keep the installed package lean.
@@ -107,6 +109,7 @@ Pre-generated demo outputs are kept under `examples/{1_samples, 2_decomposition,
 | `1_samples/` | `points_13.json` (copy), `target_file.csv` (id + P1..P13), `ground_truth.csv` (id + scenario + a1..a9), `wafer_maps.png`, `measurement_plot.png` |
 | `2_decomposition/` | `decomposed_targets_lsq.csv` (LSQ fit), `decomposed_targets_ridge.csv` (Ridge fit) — each is `id + a1..a9` |
 | `3_verification/` | `decomposition_results.csv` (truth vs lsq vs ridge), `decomposition_summary_lsq.png`, `decomposition_summary_ridge.png` |
+| `4_reconstruction/` | `reconstructed_targets.csv` (id + P1..PN) — Stage 2 coefficients pushed back through `T = A·a`, no truth comparison |
 
 ---
 
@@ -260,6 +263,23 @@ python generate_pyramid_image.py --with_names
 ```
 
 Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options: `--n_max` (default 4 → 15 terms), `--with_names` (Piston/Tilt X/... labels), `--output_folder`, `--output_file`, `--cmap`. See `-h` for the full list.
+
+### Optional — `wlzpoly.reconstruct` (inverse of Stage 2)
+
+`wlzpoly.reconstruct` is the **inverse of `decompose`**: it pushes the fitted Zernike coefficients back through the basis matrix to recover the N-point measurement profile (`T = A·a`). No ground-truth comparison and no R² — intended for production / inference use where the true T is unknown.
+
+```bash
+python -m wlzpoly.reconstruct `
+    --working_folder . `
+    --wafer_points ./1_samples/points_13.json `
+    --input_file ./2_decomposition/decomposed_targets_lsq.csv `
+    --output_folder ./4_reconstruction `
+    --output_file reconstructed_lsq.csv `
+    --n_terms 9 `
+    --col_wafer_id id
+```
+
+Output: `4_reconstruction/reconstructed_lsq.csv` (`id + P1..PN`, same wide shape as Stage 1's `target_file.csv`). The `reconstruct()` Python API returns a `pd.DataFrame` only — the CLI handles CSV writing.
 
 ---
 
@@ -500,6 +520,27 @@ python -m wlzpoly.verify [options]
 | `--n_terms` | 9 | Number of Zernike polynomial terms (must match Stage 2 run) |
 | `--scenarios_to_show` | auto (all non-`drift` scenarios) | Scenario labels to include in per-scenario tables/charts |
 | `--output_folder` | `Path.cwd() / "verification"` | Output folder |
+
+### `reconstruct.py` (optional, inverse of `decompose`)
+
+```bash
+python -m wlzpoly.reconstruct [options]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--working_folder` | `Path.cwd()` | Base folder for resolving `--wafer_points` |
+| `--wafer_points` | `"wafer_points.json"` | Wafer-points JSON (resolved under `--working_folder` if relative) |
+| `--input_file` | `"decomposed_targets.csv"` | Decomposed-coefficients CSV (id + `<prefix>1..<prefix>N`) |
+| `--n_terms` | 9 | Number of Zernike terms to read from `--input_file` |
+| `--output_folder` | `Path.cwd() / "reconstruction"` | Output folder (CSV is written by the CLI; `reconstruct()` API only returns the DataFrame) |
+| `--output_file` | `"reconstructed_targets.csv"` | Filename for the reconstructed-measurements CSV |
+| `--coordinate` | cartesian | `cartesian` (read x, y) or `polar` (read r, theta) |
+| `--col_wafer_id` | `"wafer_id"` | Name of the wafer-id column in `--input_file` (also used as id column in output CSV) |
+| `--col_points` | `P1 P2 … P13` | Output measurement-point column names; subset/permutation of `--wafer_points` point ids |
+| `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in `--input_file` |
+
+`--input_file` 의 컬럼 / `--wafer_points` JSON 의 point id 가 `--col_wafer_id` / `--coeff_prefix` / `--col_points` 와 매치 안 되면 `parse_args()` 단계에서 `parser.error` 로 종료.
 
 ### Note on the coordinate option
 
@@ -777,6 +818,19 @@ Wafer thickness is modeled as a sum of Zernike polynomials on the unit disk:
 ```
 T(ρ, θ) = Σ_{k=1..N} a_k · Z_k(ρ, θ) + ε
 ```
+
+where:
+
+| Symbol | Meaning |
+|---|---|
+| `T(ρ, θ)` | wafer thickness at a point on the unit disk (the quantity being decomposed) |
+| `ρ` | normalized radial coordinate; ρ = 0 at the wafer center, ρ = 1 at the fitting-radius edge |
+| `θ` | azimuthal angle, in radians, measured CCW from the +x axis |
+| `N` | number of Zernike terms retained in the expansion (= the `--n_terms` CLI flag) |
+| `k` | Noll index, k = 1 .. N |
+| `a_k` | k-th Zernike coefficient (Noll index k), recovered by the fitter |
+| `Z_k(ρ, θ)` | k-th Zernike polynomial in the Noll convention |
+| `ε` | measurement noise (per-point residual not captured by the first N basis functions) |
 
 Sampled at the 13 measurement points, this becomes a linear system:
 

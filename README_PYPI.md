@@ -92,6 +92,18 @@ python -m wlzpoly.verify ...                     # Stage 3: read both CSVs + gro
 
 Every parameter is a CLI flag — `--working_folder`, `--wafer_points`, `--input_file`, `--output_file`, `--auto_lam`, `--col_wafer_id`, `--col_points`, `--coeff_prefix`, `--decomposed_lsq_file`, `--decomposed_ridge_file`, `--ground_truth_file`, `--n_terms`, `--solver`, etc. See `python -m wlzpoly.decompose -h` / `verify -h` for the full list. Demo outputs land in `examples/{1_samples, 2_decomposition, 3_verification}/`; pre-generated copies are visible on the GitHub repo.
 
+### Optional — `wlzpoly.reconstruct`
+
+Inverse of `decompose`: pushes fitted coefficients back through the basis matrix to rebuild the N-point measurement profile (`T = A·a`). No R² / no ground-truth comparison — production / inference use case where the true T is unknown.
+
+```bash
+python -m wlzpoly.reconstruct --input_file decomposed_targets.csv `
+    --wafer_points wafer_points.json --n_terms 9 `
+    --output_folder ./4_reconstruction
+```
+
+Python API: `wlzpoly.reconstruct.reconstruct(...)` returns a `pd.DataFrame` (`index = wafer_id`, `columns = P1..PN`); the CLI handles CSV writing.
+
 ## Documentation
 
 Full documentation — folder layout, CLI options, configuration files, output schemas, scenario reference, recipes, algorithm summary — lives on the GitHub README:
