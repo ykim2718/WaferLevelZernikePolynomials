@@ -838,6 +838,17 @@ Sampled at the 13 measurement points, this becomes a linear system:
 T = A · a + ε     (T: 13×1, A: 13×9, a: 9×1)
 ```
 
+where:
+
+| Symbol | Shape | Meaning |
+|---|---|---|
+| `T` | 13×1 | measured thickness vector; `T[i]` = thickness at measurement point i |
+| `A` | 13×9 | basis matrix; `A[i, k] = Z_k(ρ_i, θ_i)` — k-th Zernike polynomial evaluated at the i-th measurement point |
+| `a` | 9×1 | Zernike coefficient vector; `a[k] = a_k`, the unknown to be recovered by the fitter |
+| `ε` | 13×1 | per-point measurement noise (residual not captured by the first 9 basis functions) |
+| `13` | — | number of measurement points (= rows of `A` and `T`); set by `--wafer_points` JSON |
+| `9` | — | number of Zernike terms (= columns of `A` = rows of `a`); set by `--n_terms` (default 9) |
+
 ### Fitting
 
 | Solver | Formula | Properties |
