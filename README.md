@@ -543,6 +543,7 @@ CLI options are split into two argparse groups (`Input` / `Output`); `-h` displa
 | `--col_wafer_id` | `"wafer_id"` | Name of the wafer-id column in `--decomposed_file` (also used as id column in output CSV) |
 | `--col_points` | `P1 P2 … P13` | Output measurement-point column names; subset/permutation of `--wafer_point_json` point ids |
 | `--coeff_prefix` | `"a"` | Prefix for the coefficient columns in `--decomposed_file` |
+| `--coeff_suffix` | `""` | Optional trailing tag on the coefficient columns (e.g. `_pred` / `_true` produced by ML-pipeline train_output / test_output CSVs). Columns are read as `<prefix><j><suffix>` and stripped to bare `<prefix><j>` internally. Empty by default (matches `wlzpoly.decompose` output) |
 
 **Output**
 
@@ -551,7 +552,7 @@ CLI options are split into two argparse groups (`Input` / `Output`); `-h` displa
 | `--output_folder` | `Path.cwd() / "reconstruction"` | Output folder (CSV is written by the CLI; `reconstruct()` API only returns the DataFrame) |
 | `--output_file` | `"reconstructed_targets.csv"` | Filename for the reconstructed-measurements CSV |
 
-`parse_args()` aborts with `parser.error` if any of the following are violated: `--wafer_point_json` does not end in `.json`; `--decomposed_file` or `--wafer_point_json` does not exist; `--decomposed_file` is missing the required `--col_wafer_id` / `<coeff_prefix>1..<coeff_prefix>N` columns; the number of `<coeff_prefix>\d+` columns in `--decomposed_file` does not equal `--n_terms`; any of `--col_points` is not present in the `--wafer_point_json` point ids.
+`parse_args()` aborts with `parser.error` if any of the following are violated: `--wafer_point_json` does not end in `.json`; `--decomposed_file` or `--wafer_point_json` does not exist; `--decomposed_file` is missing the required `--col_wafer_id` / `<coeff_prefix>1<coeff_suffix>..<coeff_prefix>N<coeff_suffix>` columns; the number of `<coeff_prefix>\d+<coeff_suffix>` columns in `--decomposed_file` does not equal `--n_terms`; any of `--col_points` is not present in the `--wafer_point_json` point ids.
 
 ### Note on the coordinate option
 

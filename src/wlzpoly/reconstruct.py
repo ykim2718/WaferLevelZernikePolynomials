@@ -115,15 +115,24 @@ def load_decomposed_coefficients(
     n_terms: int,
     col_wafer_id: str = COL_WAFER_ID_DEFAULT,
     coeff_prefix: str = COEFF_PREFIX_DEFAULT,
+    coeff_suffix: str = "",
 ) -> pd.DataFrame:
-    """Read decomposed-coefficients CSV (id + <prefix>1..<prefix>N).
+    """Read decomposed-coefficients CSV (id + <prefix>1<suffix>..
+    <prefix>N<suffix>).
+
+    The ``coeff_suffix`` parameter lets the caller read CSVs whose
+    coefficient columns carry a trailing tag like ``_pred`` / ``_true``
+    (e.g. produced by an ML pipeline's train_output / test_output).
+    The suffix is stripped from the returned column names, so
+    downstream basis-matmul code can address columns by their bare
+    Noll index regardless of how the source CSV happened to label them.
 
     Returns
     -------
     pd.DataFrame
         index.name = col_wafer_id
         columns    = ['<prefix>1', '<prefix>2', ...,
-                      '<prefix>n_terms']
+                      '<prefix>n_terms']  (suffix stripped)
     """
     assert isinstance(decomposed_file, (str, Path)), (
         f"decomposed_file must be str/Path, got "
@@ -132,15 +141,28 @@ def load_decomposed_coefficients(
     assert isinstance(n_terms, int), (
         f"n_terms must be int, got {type(n_terms).__name__}"
     )
-    coef_cols = [
+    assert isinstance(coeff_suffix, str), (
+        f"coeff_suffix must be str, got "
+        f"{type(coeff_suffix).__name__}"
+    )
+    src_cols = [
+        f"{coeff_prefix}{j}{coeff_suffix}"
+        for j in range(1, n_terms + 1)
+    ]
+    bare_cols = [
         f"{coeff_prefix}{j}" for j in range(1, n_terms + 1)
     ]
     df = pd.read_csv(
         Path(decomposed_file),
-        usecols=[col_wafer_id] + coef_cols,
+        usecols=[col_wafer_id] + src_cols,
     )
     df = df.set_index(col_wafer_id)
-    return df[coef_cols]
+    # Rename to bare ('a1_pred' -> 'a1') so callers can use the
+    # canonical index-based naming regardless of source labelling.
+    if coeff_suffix:
+        df = df.rename(
+            columns=dict(zip(src_cols, bare_cols)))
+    return df[bare_cols]
 
 
 def reconstruct(
@@ -152,6 +174,7 @@ def reconstruct(
     col_wafer_id: str = COL_WAFER_ID_DEFAULT,
     col_points: Optional[List[str]] = None,
     coeff_prefix: str = COEFF_PREFIX_DEFAULT,
+    coeff_suffix: str = "",
 ) -> pd.DataFrame:
     """Rebuild N-point measurements from decomposed coefficients.
 
@@ -232,6 +255,10 @@ def reconstruct(
         f"coeff_prefix must be str, got "
         f"{type(coeff_prefix).__name__}"
     )
+    assert isinstance(coeff_suffix, str), (
+        f"coeff_suffix must be str, got "
+        f"{type(coeff_suffix).__name__}"
+    )
 
     # ---- Build basis A (n_points x n_terms) ----
     coords_df = load_wafer_coordinates(
@@ -252,6 +279,7 @@ def reconstruct(
         n_terms=n_terms,
         col_wafer_id=col_wafer_id,
         coeff_prefix=coeff_prefix,
+        coeff_suffix=coeff_suffix,
     )
 
     print("=" * 70)
@@ -332,6 +360,15 @@ def parse_args() -> argparse.Namespace:
         "--coeff_prefix", type=str,
         default=COEFF_PREFIX_DEFAULT, help=_COEFF_PREFIX_HELP,
     )
+    input_group.add_argument(
+        "--coeff_suffix", type=str, default="",
+        help=('Optional trailing tag on the coefficient columns '
+              'in --decomposed_file (e.g. "_pred" / "_true" for '
+              'ML-pipeline train_output / test_output CSVs). '
+              'Combined as <prefix><j><suffix> when reading; '
+              'stripped to <prefix><j> internally. '
+              '(default: "" -- bare wlzpoly.decompose output)'),
+    )
 
     output_group.add_argument(
         "--output_folder", type=Path,
@@ -357,7 +394,7 @@ def parse_args() -> argparse.Namespace:
             f"--decomposed_file is not a readable CSV "
             f"({dec_path}): {exc}")
     needed = [args.col_wafer_id] + [
-        f"{args.coeff_prefix}{j}"
+        f"{args.coeff_prefix}{j}{args.coeff_suffix}"
         for j in range(1, args.n_terms + 1)
     ]
     missing = [c for c in needed if c not in csv_cols]
@@ -368,10 +405,12 @@ def parse_args() -> argparse.Namespace:
 
     # --- Validation: --n_terms vs coefficient column count ---
     # Count CSV columns whose name matches the pattern
-    # "<coeff_prefix><digits>" exactly; this is the canonical
-    # set produced by wlzpoly.decompose.
+    # "<coeff_prefix><digits><coeff_suffix>" exactly; this is the
+    # canonical set produced by wlzpoly.decompose (suffix='') or by
+    # train_output / test_output CSVs (suffix='_pred' / '_true').
     coef_pat = re.compile(
-        rf"^{re.escape(args.coeff_prefix)}(\d+)$"
+        rf"^{re.escape(args.coeff_prefix)}(\d+)"
+        rf"{re.escape(args.coeff_suffix)}$"
     )
     coef_cols_in_csv = [c for c in csv_cols if coef_pat.match(c)]
     if len(coef_cols_in_csv) != args.n_terms:
@@ -442,6 +481,7 @@ if __name__ == "__main__":
     print(f"  col_wafer_id    : {args.col_wafer_id}")
     print(f"  col_points      : {args.col_points}")
     print(f"  coeff_prefix    : {args.coeff_prefix}")
+    print(f"  coeff_suffix    : {args.coeff_suffix!r}")
     print()
 
     recon_df = reconstruct(
@@ -452,6 +492,7 @@ if __name__ == "__main__":
         col_wafer_id=args.col_wafer_id,
         col_points=args.col_points,
         coeff_prefix=args.coeff_prefix,
+        coeff_suffix=args.coeff_suffix,
     )
 
     # ---- Write the reconstructed measurements CSV ----

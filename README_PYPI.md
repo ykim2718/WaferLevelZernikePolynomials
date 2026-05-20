@@ -103,7 +103,7 @@ python -m wlzpoly.reconstruct `
     --output_folder ./4_reconstruction
 ```
 
-CLI options are split into `Input` (`--input_folder`, `--wafer_point_json`, `--decomposed_file`, `--n_terms`, `--coordinate`, `--col_wafer_id`, `--col_points`, `--coeff_prefix`) and `Output` (`--output_folder`, `--output_file`) argparse groups.
+CLI options are split into `Input` (`--input_folder`, `--wafer_point_json`, `--decomposed_file`, `--n_terms`, `--coordinate`, `--col_wafer_id`, `--col_points`, `--coeff_prefix`, `--coeff_suffix`) and `Output` (`--output_folder`, `--output_file`) argparse groups. `--coeff_suffix` (default `""`) lets you read ML-pipeline CSVs whose coefficient columns carry trailing tags like `_pred` / `_true` (columns are read as `<prefix><j><suffix>` and stripped internally).
 
 Python API: `wlzpoly.reconstruct.reconstruct(...)` returns a `pd.DataFrame` (`index = wafer_id`, `columns = P1..PN`); the CLI handles CSV writing.
 
