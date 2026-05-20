@@ -264,7 +264,7 @@ python generate_pyramid_image.py --with_names
 
 Outputs `zernike_pyramid.png` in the script's folder by default. Key CLI options: `--n_max` (default 4 → 15 terms), `--with_names` (Piston/Tilt X/... labels), `--output_folder`, `--output_file`, `--cmap`. See `-h` for the full list.
 
-### Optional — `wlzpoly.reconstruct` (inverse of Stage 2)
+### Stage 4 — `wlzpoly.reconstruct`
 
 `wlzpoly.reconstruct` is the **inverse of `decompose`**: it pushes the fitted Zernike coefficients back through the basis matrix to recover the N-point measurement profile (`T = A·a`). No ground-truth comparison and no R² — intended for production / inference use where the true T is unknown.
 
@@ -318,18 +318,20 @@ Output: `4_reconstruction/reconstructed_lsq.csv` (`id + P1..PN`, same wide shape
     │  2_decomposition/                           │
     │   decomposed_targets_lsq.csv                │
     │   decomposed_targets_ridge.csv              │
-    └─────────────────────┬───────────────────────┘
-                          │  + ground_truth.csv (from 1_samples)
-                          ▼
-                ┌──────────────────┐
-                │   verify.py      │  Stage 3
-                │   (no fitting)   │
-                └────────┬─────────┘
-                         │
-                         ▼
-                ┌──────────────────┐
-                │ 3_verification/  │
-                └──────────────────┘
+    └──────────┬──────────────────────────┬───────┘
+               │                          │
+               │ + ground_truth.csv       │ + wafer_point_json
+               │   (from 1_samples)       │   (basis A)
+               ▼                          ▼
+       ┌──────────────┐           ┌──────────────────┐
+       │  verify.py   │  Stage 3  │ reconstruct.py   │  Stage 4
+       │ (no fitting) │           │ (T_recon = A·a)  │
+       └──────┬───────┘           └────────┬─────────┘
+              │                            │
+              ▼                            ▼
+      ┌──────────────────┐         ┌──────────────────┐
+      │ 3_verification/  │         │ 4_reconstruction/│
+      └──────────────────┘         └──────────────────┘
 ```
 
 ---
@@ -719,6 +721,17 @@ a9 (Trefoil Y)   0.8764        0.8762
 λ used for Ridge: 0.01
 ```
 
+### `reconstructed_targets.csv` (Stage 4 output)
+
+```
+id,P1,P2,P3,...,P13
+W_01,502.56,495.79,507.85,...,495.94
+W_02,503.00,510.27,497.91,...,505.76
+...
+```
+
+Same wide shape as `target_file.csv` from Stage 1 (`id + P1..PN`). Produced by `wlzpoly.reconstruct` from a Stage 2 decomposed-coefficients CSV via `T_recon = A · a`, with no noise added back. The per-point residual `target_file − reconstructed_targets` is the part that the first N Zernike basis functions could not absorb (noise + truncation error). `run_demo.ps1` writes two files — `reconstructed_lsq.csv` and `reconstructed_ridge.csv` — mirroring the Stage 2 fits.
+
 ---
 
 ## Scenario reference
@@ -773,6 +786,22 @@ python -m wlzpoly.verify \
     --decomposed_ridge_file ./2_decomposition/decomposed_targets_ridge.csv \
     --ground_truth_file ./1_samples/ground_truth.csv \
     --n_terms 9 --output_folder ./3_verification
+
+# Stage 4a: LSQ reconstruction
+python -m wlzpoly.reconstruct --input_folder . \
+    --wafer_point_json ./1_samples/points_13.json \
+    --decomposed_file ./2_decomposition/decomposed_targets_lsq.csv \
+    --output_folder ./4_reconstruction \
+    --output_file reconstructed_lsq.csv \
+    --n_terms 9 --col_wafer_id id
+
+# Stage 4b: Ridge reconstruction
+python -m wlzpoly.reconstruct --input_folder . \
+    --wafer_point_json ./1_samples/points_13.json \
+    --decomposed_file ./2_decomposition/decomposed_targets_ridge.csv \
+    --output_folder ./4_reconstruction \
+    --output_file reconstructed_ridge.csv \
+    --n_terms 9 --col_wafer_id id
 ```
 
 ### Add a new scenario
@@ -793,15 +822,18 @@ No code change required.
 
 ### Extend the Zernike order
 
-Two places matter:
+Three places matter:
 
 1. **Stage 1** (ground-truth generation): bump `cfg["decomposition"]["n_terms"]` in `config.json` so `ground_truth.csv` carries `a1..a11` instead of `a1..a9`.
 
 2. **Stage 2 / 3** (fitting + verification): pass `--n_terms 11` on the CLI. The flag is the only authority for the fitter — neither module reads `config.json`.
 
+3. **Stage 4** (reconstruction): pass the **same** `--n_terms 11` to `wlzpoly.reconstruct`. The CLI rejects any mismatch between `--n_terms` and the `<coeff_prefix>\d+` column count in `--decomposed_file`, so Stages 2 and 4 must agree.
+
 ```bash
-python -m wlzpoly.decompose ... --n_terms 11
-python -m wlzpoly.verify    ... --n_terms 11
+python -m wlzpoly.decompose    ... --n_terms 11
+python -m wlzpoly.verify       ... --n_terms 11
+python -m wlzpoly.reconstruct  ... --n_terms 11
 ```
 
 Maximum `n_terms` is the number of measurement points (13 here). Exceeding it makes `AᵀA` singular and the coefficients diverge — leave at least 4 residual DOF for stable fits.
