@@ -63,3 +63,25 @@ python -m wlzpoly.verify `
     --ground_truth_file ./1_samples/ground_truth.csv `
     --n_terms 9 `
     --output_folder ./3_verification
+
+# Stage 4a: LSQ reconstruction      -> examples/4_reconstruction/reconstructed_lsq.csv
+python -m wlzpoly.reconstruct `
+    --input_folder . `
+    --wafer_point_json ./1_samples/points_13.json `
+    --decomposed_file ./2_decomposition/decomposed_targets_lsq.csv `
+    --output_folder ./4_reconstruction `
+    --output_file reconstructed_lsq.csv `
+    --n_terms 9 `
+    --col_wafer_id id `
+    --coordinate cartesian
+
+# Stage 4b: Ridge reconstruction    -> examples/4_reconstruction/reconstructed_ridge.csv
+python -m wlzpoly.reconstruct `
+    --input_folder . `
+    --wafer_point_json ./1_samples/points_13.json `
+    --decomposed_file ./2_decomposition/decomposed_targets_ridge.csv `
+    --output_folder ./4_reconstruction `
+    --output_file reconstructed_ridge.csv `
+    --n_terms 9 `
+    --col_wafer_id id `
+    --coordinate cartesian
